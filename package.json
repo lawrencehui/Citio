@@ -1,0 +1,39 @@
+{
+  "name": "citio",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "bin": {
+    "citio": "dist/cli/init.js"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "init": "tsx src/cli/init.ts",
+    "start": "node dist/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "Self-hosted MCP server for autonomous coding agents with Slack integration",
+  "type": "module",
+  "dependencies": {
+    "@aws-sdk/client-ec2": "^3.1019.0",
+    "@aws-sdk/client-ecr": "^3.1019.0",
+    "@aws-sdk/client-ecs": "^3.1019.0",
+    "@aws-sdk/client-efs": "^3.1019.0",
+    "@aws-sdk/client-iam": "^3.1019.0",
+    "@aws-sdk/client-sts": "^3.1019.0",
+    "@clack/prompts": "^1.1.0",
+    "@modelcontextprotocol/sdk": "^1.28.0",
+    "@slack/bolt": "^4.6.0",
+    "dotenv": "^17.3.1",
+    "yaml": "^2.8.3",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
+  }
+}

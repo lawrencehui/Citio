@@ -1,0 +1,8 @@
+node_modules
+src
+.git
+.gstack
+*.md
+!README.md
+tsconfig.json
+.env
