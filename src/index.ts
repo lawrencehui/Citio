@@ -42,6 +42,33 @@ async function main(): Promise<void> {
     })
   );
 
+  // Ensure agent CLI is authenticated before anything else
+  const provider = config.engine.default_provider;
+  if (provider === "codex") {
+    const { execSync: ex } = await import("child_process");
+    // Quick auth check: try a no-op codex command
+    try {
+      ex("codex exec 'echo ok' --skip-git-repo-check -s danger-full-access", {
+        stdio: "pipe", timeout: 30000, cwd: "/tmp",
+      });
+      console.log(JSON.stringify({ type: "auth_check", provider: "codex", status: "valid" }));
+    } catch {
+      // Auth failed or missing. Run device auth (outputs URL + code to stdout/logs).
+      console.log(JSON.stringify({ type: "auth_check", provider: "codex", status: "needs_auth" }));
+      console.log("========================================");
+      console.log("CODEX AUTH REQUIRED — complete device auth below");
+      console.log("========================================");
+      try {
+        ex("codex login --device-auth", { stdio: "inherit", timeout: 300000 });
+        console.log(JSON.stringify({ type: "auth_complete", provider: "codex" }));
+      } catch (err) {
+        console.error("Auth failed. Container will retry on next restart.");
+        console.error(err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
+    }
+  }
+
   // Initialize workspace
   const workspace = new WorkspaceManager(config, workspacePath);
   await workspace.initialize();
