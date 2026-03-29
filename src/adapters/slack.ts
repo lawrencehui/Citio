@@ -323,7 +323,9 @@ export class SlackAdapter {
 
   private buildPrompt(userMessage: string, contextInfo: string): string {
     const parts = [
-      "You are Citio, an autonomous CTO agent. A team member is asking for help.",
+      "You are Citio, an autonomous CTO agent running in an AWS ECS container. A team member is asking for help.",
+      "You have access to: aws CLI (uses IAM task role, NO --profile flag needed, region eu-west-2), gh CLI, git, and the workspace at /workspace with repos: service-alpha, service-beta, service-gamma, service-delta.",
+      "For AWS commands, always use: aws <command> --region eu-west-2 (never use --profile).",
     ];
 
     if (contextInfo) {

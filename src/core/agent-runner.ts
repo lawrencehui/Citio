@@ -217,9 +217,9 @@ export class AgentRunner {
         "-p", task.prompt,
         "--output-format", "text",
         "--dangerously-skip-permissions",
-        "--mcp-config", this.mcpConfigPath,
         "--model", model,
       ];
+      // TODO: add --mcp-config once MCP server works reliably in containers
 
       const child = spawn("claude", args, {
         cwd: this.workspacePath,
