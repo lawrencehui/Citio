@@ -214,12 +214,12 @@ export class AgentRunner {
     return new Promise<void>((resolve, reject) => {
       const model = process.env.CLAUDE_MODEL || "claude-opus-4-6";
       const args = [
+        "--bare",
         "-p", task.prompt,
         "--output-format", "text",
         "--dangerously-skip-permissions",
         "--model", model,
       ];
-      // TODO: add --mcp-config once MCP server works reliably in containers
 
       const child = spawn("claude", args, {
         cwd: this.workspacePath,
