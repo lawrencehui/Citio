@@ -1,4 +1,6 @@
 import { spawn, type ChildProcess } from "child_process";
+import { writeFileSync, mkdirSync, existsSync } from "fs";
+import path from "path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { CitioConfig } from "../config/schema.js";
@@ -17,6 +19,7 @@ export class AgentRunner {
   private workspacePath: string;
   private mcpClient: Client | null = null;
   private mcpProcess: ChildProcess | null = null;
+  private mcpConfigPath: string = "";
   private threadMap = new Map<string, string>(); // slack_thread_ts → codex_thread_id
 
   constructor(config: CitioConfig, workspacePath: string) {
@@ -70,9 +73,43 @@ export class AgentRunner {
   }
 
   private async startClaudeMcpServer(): Promise<void> {
-    // For Claude Code, use the existing -p approach as fallback
-    // TODO: check if Claude Code has an mcp-server mode
-    console.log(JSON.stringify({ type: "claude_direct_mode" }));
+    // Claude Code uses --mcp-config to connect to our MCP tools server
+    // Generate MCP config that points to our mcp-entry.ts
+    this.generateMcpConfig();
+    console.log(JSON.stringify({ type: "claude_mcp_configured", config: this.mcpConfigPath }));
+  }
+
+  private generateMcpConfig(): void {
+    const distEntry = path.resolve(process.cwd(), "dist/core/mcp-entry.js");
+    const srcEntry = path.resolve(process.cwd(), "src/core/mcp-entry.ts");
+    const useTs = !existsSync(distEntry);
+    const mcpCommand = useTs ? "npx" : "node";
+    const mcpArgs = useTs ? ["tsx", srcEntry] : [distEntry];
+
+    const configDir = "/tmp/citio";
+    mkdirSync(configDir, { recursive: true });
+    this.mcpConfigPath = `${configDir}/mcp-config.json`;
+
+    const mcpConfig = {
+      mcpServers: {
+        citio: {
+          command: mcpCommand,
+          args: mcpArgs,
+          env: {
+            CITIO_CONFIG: process.env.CITIO_CONFIG || "citio.yaml",
+            CITIO_WORKSPACE: this.workspacePath,
+            CITIO_MEMORY: process.env.CITIO_MEMORY || "/memory",
+            GH_TOKEN: process.env.GH_TOKEN || "",
+            AWS_PROFILE: process.env.AWS_PROFILE || "",
+            AWS_DEFAULT_REGION: process.env.AWS_DEFAULT_REGION || "",
+            HOME: process.env.HOME || "",
+            PATH: process.env.PATH || "",
+          },
+        },
+      },
+    };
+
+    writeFileSync(this.mcpConfigPath, JSON.stringify(mcpConfig, null, 2), "utf-8");
   }
 
   async submit(task: QueuedTask): Promise<void> {
@@ -173,12 +210,14 @@ export class AgentRunner {
   }
 
   private async runClaudeTask(task: QueuedTask): Promise<void> {
-    // Fallback: spawn claude -p for Claude Code
     return new Promise<void>((resolve, reject) => {
+      const model = process.env.CLAUDE_MODEL || "claude-opus-4-6";
       const args = [
         "-p", task.prompt,
         "--output-format", "text",
         "--dangerously-skip-permissions",
+        "--mcp-config", this.mcpConfigPath,
+        "--model", model,
       ];
 
       const child = spawn("claude", args, {

@@ -42,6 +42,38 @@ async function main(): Promise<void> {
     })
   );
 
+  // Refresh Codex tokens on startup (id_token expires every hour)
+  if (config.engine.default_provider === "codex") {
+    const fs = await import("fs");
+    const home = process.env.HOME || "/home/citio";
+    console.log(JSON.stringify({ type: "debug_home", HOME: home }));
+    const authPath = `${home}/.codex/auth.json`;
+    try {
+      const authData = JSON.parse(fs.readFileSync(authPath, "utf-8"));
+      const refreshToken = authData?.tokens?.refresh_token;
+      if (refreshToken) {
+        console.log(JSON.stringify({ type: "token_refresh", status: "refreshing" }));
+        const { execSync: ex } = await import("child_process");
+        const resp = ex(
+          `curl -s -X POST "https://auth.openai.com/oauth/token" -H "Content-Type: application/json" -d '{"grant_type":"refresh_token","refresh_token":"${refreshToken}","client_id":"app_EMoamEEZ73f0CkXaXp7hrann"}'`,
+          { encoding: "utf-8", timeout: 15000 }
+        );
+        const fresh = JSON.parse(resp);
+        if (fresh.id_token && fresh.access_token) {
+          authData.tokens.id_token = fresh.id_token;
+          authData.tokens.access_token = fresh.access_token;
+          if (fresh.refresh_token) authData.tokens.refresh_token = fresh.refresh_token;
+          fs.writeFileSync(authPath, JSON.stringify(authData, null, 2));
+          console.log(JSON.stringify({ type: "token_refresh", status: "success" }));
+        } else {
+          console.log(JSON.stringify({ type: "token_refresh", status: "failed", error: JSON.stringify(fresh) }));
+        }
+      }
+    } catch (err) {
+      console.log(JSON.stringify({ type: "token_refresh", status: "error", error: err instanceof Error ? err.message : String(err) }));
+    }
+  }
+
   // Initialize workspace
   const workspace = new WorkspaceManager(config, workspacePath);
   await workspace.initialize();
