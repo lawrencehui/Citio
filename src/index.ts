@@ -48,8 +48,9 @@ async function main(): Promise<void> {
     const { execSync: ex } = await import("child_process");
     // Quick auth check: try a no-op codex command
     try {
-      ex("codex exec 'echo ok' --skip-git-repo-check -s danger-full-access", {
+      ex("codex exec 'echo ok' --skip-git-repo-check -s danger-full-access --ephemeral", {
         stdio: "pipe", timeout: 30000, cwd: "/tmp",
+        env: { ...process.env, HOME: process.env.HOME || "/home/citio" },
       });
       console.log(JSON.stringify({ type: "auth_check", provider: "codex", status: "valid" }));
     } catch {
