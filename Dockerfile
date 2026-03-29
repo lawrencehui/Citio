@@ -22,13 +22,10 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY dist/ ./dist/
 
-# Default config (user overrides via mount or env)
-COPY citio.yaml ./
-
-# Workspace, memory, and tmp dirs
-RUN mkdir -p /workspace /memory /tmp/citio \
-    && chown -R citio:citio /workspace /memory /tmp/citio /app
-VOLUME ["/workspace", "/memory"]
+# Config volume — mount your citio.yaml here, edit anytime, restart to apply
+RUN mkdir -p /config /workspace /memory /tmp/citio \
+    && chown -R citio:citio /config /workspace /memory /tmp/citio /app
+VOLUME ["/config", "/workspace", "/memory"]
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
@@ -38,7 +35,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
 USER citio
 
 # Default env vars (override at runtime)
-ENV CITIO_CONFIG=/app/citio.yaml
+ENV CITIO_CONFIG=/config/citio.yaml
 ENV CITIO_WORKSPACE=/workspace
 ENV CITIO_MEMORY=/memory
 ENV NODE_ENV=production

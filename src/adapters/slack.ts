@@ -145,7 +145,7 @@ export class SlackAdapter {
           }
 
           // Build the prompt with thread context
-          const prompt = this.buildPrompt(text, "", contextInfo);
+          const prompt = this.buildPrompt(text, contextInfo);
 
           // Show queue status if busy
           if (this.agentRunner.isRunning) {
@@ -241,17 +241,13 @@ export class SlackAdapter {
     });
   }
 
-  private buildPrompt(userMessage: string, threadHistory: string, contextInfo: string): string {
+  private buildPrompt(userMessage: string, contextInfo: string): string {
     const parts = [
       "You are Citio, an autonomous CTO agent. A team member is asking for help.",
     ];
 
     if (contextInfo) {
       parts.push(contextInfo);
-    }
-
-    if (threadHistory) {
-      parts.push(`Previous conversation:\n${threadHistory}`);
     }
 
     parts.push(`User's message: ${userMessage}`);

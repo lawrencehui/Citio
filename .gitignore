@@ -5,3 +5,4 @@ dist/
 .citio/
 /workspace/
 /memory/
+.docker-*-auth

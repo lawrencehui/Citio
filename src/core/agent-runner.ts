@@ -1,6 +1,5 @@
 import { spawn, type ChildProcess } from "child_process";
 import { writeFileSync, mkdirSync, existsSync } from "fs";
-import { randomUUID } from "crypto";
 import path from "path";
 import type { CitioConfig } from "../config/schema.js";
 
@@ -19,7 +18,6 @@ export class AgentRunner {
   private sessionId: string | null = null; // null until first message creates one
   private workspacePath: string;
   private mcpConfigPath: string;
-  private taskCount = 0;
 
   constructor(config: CitioConfig, workspacePath: string) {
     this.config = config;
@@ -208,19 +206,19 @@ export class AgentRunner {
       // Wall-clock timeout
       const timeoutMs = this.config.engine.max_session_duration_minutes * 60 * 1000;
       setTimeout(() => {
-        if (child.exitCode === null) {
+        if (child.exitCode === null && child.pid) {
           console.log(JSON.stringify({
             type: "agent_timeout",
             session_id: this.sessionId,
             timeout_ms: timeoutMs,
           }));
           try {
-            process.kill(-child.pid!, "SIGTERM");
+            process.kill(-child.pid, "SIGTERM");
             setTimeout(() => {
-              try { process.kill(-child.pid!, "SIGKILL"); } catch { /* already dead */ }
+              try { if (child.pid) process.kill(-child.pid, "SIGKILL"); } catch { /* already dead */ }
             }, 10000);
           } catch {
-            child.kill("SIGKILL");
+            try { child.kill("SIGKILL"); } catch { /* already dead */ }
           }
         }
       }, timeoutMs);
@@ -253,12 +251,13 @@ export class AgentRunner {
     this.queue = [];
 
     // Kill current process
-    if (this.currentProcess && this.currentProcess.exitCode === null) {
+    if (this.currentProcess && this.currentProcess.exitCode === null && this.currentProcess.pid) {
+      const pid = this.currentProcess.pid;
       try {
-        process.kill(-this.currentProcess.pid!, "SIGTERM");
+        process.kill(-pid, "SIGTERM");
         await new Promise<void>((r) => setTimeout(r, 5000));
         if (this.currentProcess.exitCode === null) {
-          process.kill(-this.currentProcess.pid!, "SIGKILL");
+          process.kill(-pid, "SIGKILL");
         }
       } catch {
         try { this.currentProcess.kill("SIGKILL"); } catch { /* already dead */ }

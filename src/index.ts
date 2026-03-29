@@ -5,29 +5,21 @@ import { CitioConfigSchema } from "./config/schema.js";
 import { WorkspaceManager } from "./core/workspace.js";
 import { AgentRunner } from "./core/agent-runner.js";
 import { SlackAdapter } from "./adapters/slack.js";
+import { resolveEnvVars } from "./utils/env.js";
 import { createServer } from "http";
-
-function resolveEnvVars(obj: unknown): unknown {
-  if (typeof obj === "string") {
-    return obj.replace(/\$\{(\w+)\}/g, (_, key) => process.env[key] || "");
-  }
-  if (Array.isArray(obj)) return obj.map(resolveEnvVars);
-  if (obj && typeof obj === "object") {
-    const result: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(obj)) {
-      result[key] = resolveEnvVars(value);
-    }
-    return result;
-  }
-  return obj;
-}
 
 async function main(): Promise<void> {
   const configPath = process.env.CITIO_CONFIG || "citio.yaml";
 
   let rawConfig: unknown;
   try {
-    const raw = readFileSync(configPath, "utf-8");
+    let raw: string;
+    if (process.env.CITIO_CONFIG_B64) {
+      // Config passed as base64 env var (for ECS without volume mounts)
+      raw = Buffer.from(process.env.CITIO_CONFIG_B64, "base64").toString("utf-8");
+    } else {
+      raw = readFileSync(configPath, "utf-8");
+    }
     rawConfig = resolveEnvVars(parse(raw));
   } catch (err) {
     console.error(`Failed to read config at ${configPath}:`, err);

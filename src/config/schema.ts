@@ -11,7 +11,7 @@ export const CitioConfigSchema = z.object({
   slack: z.object({
     bot_token: z.string(),
     app_token: z.string(),
-    channel_id: z.string(),
+    channel_id: z.string().optional(),
     authorized_users: z.array(z.string()).default([]),
   }),
 

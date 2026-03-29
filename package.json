@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "dist/index.js",
   "bin": {
-    "citio": "dist/cli/init.js"
+    "citio": "./dist/cli/init.js"
   },
   "scripts": {
     "dev": "tsx src/index.ts",

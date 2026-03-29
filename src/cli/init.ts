@@ -2,6 +2,7 @@
 import * as p from "@clack/prompts";
 import { execSync } from "child_process";
 import { writeFileSync, existsSync, mkdirSync } from "fs";
+import path from "path";
 import { stringify } from "yaml";
 
 interface InitConfig {
@@ -20,22 +21,36 @@ interface InitConfig {
   enableEfs: boolean;
 }
 
-const SKILL_REGISTRY: Record<string, { url: string; description: string }> = {
+const SKILL_REGISTRY: Record<string, { url: string; description: string; installMethod: "git" | "npx-skills" | "npx" }> = {
   gstack: {
     url: "https://github.com/garrytan/gstack.git",
     description: "QA, shipping, investigation, deploy, design review",
-  },
-  "code-reviewer": {
-    url: "https://github.com/citio-skills/code-reviewer.git",
-    description: "Structured code review with security checks",
+    installMethod: "git",
   },
   "frontend-design": {
-    url: "https://github.com/citio-skills/frontend-design.git",
-    description: "UI/UX design system, component patterns",
+    url: "anthropics/claude-code --skill frontend-design",
+    description: "Production-grade UI generation, avoids default design patterns",
+    installMethod: "npx-skills",
+  },
+  "code-reviewer": {
+    url: "anthropics/claude-code --skill simplify",
+    description: "Code quality review, deduplication, performance checks",
+    installMethod: "npx-skills",
   },
   "antigravity-awesome-skills": {
-    url: "https://github.com/citio-skills/antigravity-awesome-skills.git",
-    description: "Curated community skill collection",
+    url: "npx antigravity-awesome-skills --claude",
+    description: "1,234+ curated skills: brainstorming, architecture, debugging, API design",
+    installMethod: "npx",
+  },
+  "excalidraw-diagrams": {
+    url: "https://github.com/coleam00/excalidraw-diagram-skill.git",
+    description: "Architecture diagrams from natural language",
+    installMethod: "git",
+  },
+  "shannon-security": {
+    url: "https://github.com/unicodeveloper/shannon.git",
+    description: "Autonomous pen testing, 96% exploit success rate",
+    installMethod: "git",
   },
 };
 
@@ -208,7 +223,7 @@ async function collectConfig(): Promise<InitConfig> {
 
   // Skills
   const skillChoices = (await p.multiselect({
-    message: "Install community skills?",
+    message: "Install community skills? (use space to select, enter to confirm)",
     options: Object.entries(SKILL_REGISTRY).map(([name, info]) => ({
       value: name,
       label: name,
@@ -339,35 +354,59 @@ function writeConfigFile(config: InitConfig): void {
   writeFileSync(".env", envLines.join("\n") + "\n", "utf-8");
 }
 
-function installSkills(skills: string[]): void {
+function installSkills(skills: string[], githubToken: string): void {
   if (skills.length === 0) return;
 
   const skillsDir = ".citio/skills";
   mkdirSync(skillsDir, { recursive: true });
 
+  const env = {
+    ...process.env,
+    GH_TOKEN: githubToken,
+    GIT_ASKPASS: "echo",
+    GIT_TERMINAL_PROMPT: "0",
+  };
+
   for (const skill of skills) {
     const info = SKILL_REGISTRY[skill];
     if (!info) continue;
 
-    const skillPath = `${skillsDir}/${skill}`;
-    if (existsSync(skillPath)) {
-      p.log.info(`Skill ${skill} already installed, updating...`);
-      try {
-        execSync(`git -C "${skillPath}" pull --ff-only`, { stdio: "pipe" });
-      } catch {
-        p.log.warn(`Failed to update ${skill}`);
-      }
-    } else {
-      p.log.step(`Installing skill: ${skill}`);
-      try {
-        execSync(`git clone --depth 1 "${info.url}" "${skillPath}"`, {
+    p.log.step(`Installing skill: ${skill}`);
+
+    try {
+      if (info.installMethod === "git") {
+        const skillPath = `${skillsDir}/${skill}`;
+        if (existsSync(skillPath)) {
+          execSync(`git -C "${skillPath}" pull --ff-only`, { stdio: "pipe", env });
+        } else {
+          const authedUrl = githubToken
+            ? info.url.replace("https://github.com/", `https://${githubToken}@github.com/`)
+            : info.url;
+          execSync(`git clone --depth 1 "${authedUrl}" "${skillPath}"`, {
+            stdio: "pipe",
+            env,
+          });
+        }
+      } else if (info.installMethod === "npx-skills") {
+        // Uses `npx skills add <source>` — the official skill installer
+        execSync(`npx skills add ${info.url}`, {
           stdio: "pipe",
+          env,
+          timeout: 120000,
         });
-      } catch {
-        p.log.warn(
-          `Failed to install ${skill} from ${info.url}. You can install it manually later.`
-        );
+      } else if (info.installMethod === "npx") {
+        // Direct npx command
+        execSync(info.url, {
+          stdio: "pipe",
+          env,
+          timeout: 120000,
+        });
       }
+      p.log.success(`Installed ${skill}`);
+    } catch {
+      p.log.warn(
+        `Failed to install ${skill}. You can install it manually later.`
+      );
     }
   }
 }
@@ -378,6 +417,11 @@ async function deployToAws(config: InitConfig): Promise<void> {
     ? `--profile ${config.awsProfile}`
     : "";
   const region = config.awsRegion;
+
+  // All build/docker commands must run from the Citio project directory
+  const projectDir = path.resolve(
+    new URL(".", import.meta.url).pathname, "..", ".."
+  );
 
   // 1. Get account ID
   s.start("Getting AWS account info...");
@@ -402,26 +446,16 @@ async function deployToAws(config: InitConfig): Promise<void> {
 
   // 3. Build and push Docker image
   s.start("Building Docker image...");
-  execSync("npm run build", { stdio: "pipe" });
+  execSync("npm run build", { stdio: "pipe", cwd: projectDir });
 
-  // If OAuth auth, copy credential files into the build context temporarily
-  if (config.authMethod === "oauth") {
-    const homeDir = process.env.HOME || "";
-    if (config.provider === "claude" && existsSync(`${homeDir}/.claude`)) {
-      execSync(`cp -r "${homeDir}/.claude" .docker-claude-auth`, { stdio: "pipe" });
-    }
-    if (config.provider === "codex" && existsSync(`${homeDir}/.codex`)) {
-      execSync(`cp -r "${homeDir}/.codex" .docker-codex-auth`, { stdio: "pipe" });
-    }
-  }
+  // Auth is handled at RUNTIME via env vars in the ECS task definition,
+  // never baked into the Docker image.
 
   execSync("docker build -t citio:latest .", {
     stdio: "pipe",
-    timeout: 300000,
+    timeout: 600000,
+    cwd: projectDir,
   });
-
-  // Clean up auth files from build context
-  execSync("rm -rf .docker-claude-auth .docker-codex-auth", { stdio: "pipe" });
 
   s.stop("Docker image built");
 
@@ -431,7 +465,7 @@ async function deployToAws(config: InitConfig): Promise<void> {
     { stdio: "pipe" }
   );
   execSync(`docker tag citio:latest ${ecrUri}:latest`, { stdio: "pipe" });
-  execSync(`docker push ${ecrUri}:latest`, { stdio: "pipe", timeout: 300000 });
+  execSync(`docker push ${ecrUri}:latest`, { stdio: "pipe", timeout: 600000 });
   s.stop("Image pushed to ECR");
 
   // 4. Create ECS cluster
@@ -640,7 +674,7 @@ async function main(): Promise<void> {
 
   // Install skills
   if (config.skills.length > 0) {
-    installSkills(config.skills);
+    installSkills(config.skills, config.githubToken);
   }
 
   // Deploy

@@ -11,21 +11,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { CitioConfigSchema } from "../config/schema.js";
-
-function resolveEnvVars(obj: unknown): unknown {
-  if (typeof obj === "string") {
-    return obj.replace(/\$\{(\w+)\}/g, (_, key) => process.env[key] || "");
-  }
-  if (Array.isArray(obj)) return obj.map(resolveEnvVars);
-  if (obj && typeof obj === "object") {
-    const result: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(obj)) {
-      result[key] = resolveEnvVars(value);
-    }
-    return result;
-  }
-  return obj;
-}
+import { resolveEnvVars } from "../utils/env.js";
 
 const COMMAND_ALLOWLIST = new Set([
   "git", "npm", "npx", "tsc", "bun", "python", "python3", "node", "make",
@@ -43,10 +29,14 @@ async function main() {
 
   let config;
   try {
-    const raw = readFileSync(configPath, "utf-8");
+    let raw: string;
+    if (process.env.CITIO_CONFIG_B64) {
+      raw = Buffer.from(process.env.CITIO_CONFIG_B64, "base64").toString("utf-8");
+    } else {
+      raw = readFileSync(configPath, "utf-8");
+    }
     config = CitioConfigSchema.parse(resolveEnvVars(parse(raw)));
   } catch {
-    // Fallback: minimal config for MCP tools to work
     config = null;
   }
 
@@ -162,10 +152,11 @@ async function main() {
     "Run an allowlisted command in the workspace",
     { command: z.string(), cwd: z.string().optional() },
     async ({ command, cwd }) => {
-      const { execSync } = await import("child_process");
+      const { execFileSync } = await import("child_process");
       const nodePath = await import("path");
       const parts = command.trim().split(/\s+/);
       const cmd = parts[0];
+      const args = parts.slice(1);
 
       if (!cmd || COMMAND_BLOCKLIST.has(cmd)) {
         return { content: [{ type: "text" as const, text: `Command "${cmd}" is blocked.` }], isError: true };
@@ -174,13 +165,19 @@ async function main() {
         return { content: [{ type: "text" as const, text: `Command "${cmd}" not in allowlist. Allowed: ${[...COMMAND_ALLOWLIST].join(", ")}` }], isError: true };
       }
 
+      // Reject shell metacharacters to prevent injection
+      if (/[;|&`$(){}]/.test(command)) {
+        return { content: [{ type: "text" as const, text: "Error: shell metacharacters not allowed. Run one command at a time." }], isError: true };
+      }
+
       const workDir = cwd ? nodePath.resolve(workspacePath, cwd) : workspacePath;
       if (!workDir.startsWith(workspacePath)) {
         return { content: [{ type: "text" as const, text: "Error: path traversal not allowed." }], isError: true };
       }
 
       try {
-        const result = execSync(command, {
+        // execFileSync: no shell, prevents injection via metacharacters
+        const result = execFileSync(cmd, args, {
           cwd: workDir, encoding: "utf-8", timeout: 120000, maxBuffer: 10 * 1024 * 1024,
         });
         return { content: [{ type: "text" as const, text: result || "(no output)" }] };

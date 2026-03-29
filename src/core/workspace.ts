@@ -1,5 +1,5 @@
 import { execSync } from "child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "fs";
 import path from "path";
 import type { CitioConfig } from "../config/schema.js";
 
@@ -84,7 +84,6 @@ You have access to these tools via the MCP server:
 - create_branch: Create a git branch with isolated worktree
 - create_pr: Open a pull request on GitHub
 - run_command: Run allowlisted commands (git, npm, tsc, etc.)
-- post_update: Send status updates to the Slack thread
 - check_ci_status: Check CI/CD status of a PR
 - save_finding: Save learnings to org memory
 
@@ -117,8 +116,7 @@ ${skills}
     const skillsDir = this.config.skills.directory;
     if (!existsSync(skillsDir)) return "";
 
-    const fs = require("fs");
-    const entries = fs.readdirSync(skillsDir, { withFileTypes: true });
+    const entries = readdirSync(skillsDir, { withFileTypes: true });
     const skillContents: string[] = [];
 
     for (const entry of entries) {
