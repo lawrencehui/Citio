@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import * as p from "@clack/prompts";
 import { execSync } from "child_process";
-import { writeFileSync, existsSync, mkdirSync } from "fs";
+import { writeFileSync, readFileSync, existsSync, mkdirSync } from "fs";
 import path from "path";
 import { stringify } from "yaml";
 
@@ -41,16 +41,6 @@ const SKILL_REGISTRY: Record<string, { url: string; description: string; install
     url: "npx antigravity-awesome-skills --claude",
     description: "1,234+ curated skills: brainstorming, architecture, debugging, API design",
     installMethod: "npx",
-  },
-  "excalidraw-diagrams": {
-    url: "https://github.com/coleam00/excalidraw-diagram-skill.git",
-    description: "Architecture diagrams from natural language",
-    installMethod: "git",
-  },
-  "shannon-security": {
-    url: "https://github.com/unicodeveloper/shannon.git",
-    description: "Autonomous pen testing, 96% exploit success rate",
-    installMethod: "git",
   },
 };
 
@@ -125,38 +115,35 @@ async function collectConfig(): Promise<InitConfig> {
 
   let providerApiKey = "";
   if (authMethod === "oauth") {
-    const s = p.spinner();
-    s.start(`Authenticating ${provider === "claude" ? "Claude Code" : "Codex"}...`);
-    try {
-      if (provider === "claude") {
-        // Check if already logged in
-        try {
-          execSync("claude -p 'test' --output-format text 2>/dev/null", { timeout: 15000, stdio: "pipe" });
-          s.stop("Claude Code already authenticated.");
-        } catch {
-          s.stop("Opening browser for Claude login...");
-          p.log.info("Please complete the login in your browser. The container will use the credentials from ~/.claude/");
-          execSync("claude login", { stdio: "inherit", timeout: 120000 });
+    // Check if already authenticated locally
+    const homeDir = process.env.HOME || "";
+    const authPath = provider === "codex"
+      ? `${homeDir}/.codex/auth.json`
+      : `${homeDir}/.claude`;
+
+    if (existsSync(authPath)) {
+      p.log.success(
+        `Found existing ${provider === "codex" ? "Codex" : "Claude Code"} credentials at ${authPath}. ` +
+        `These will be uploaded to EFS during deploy.`
+      );
+    } else {
+      // No local credentials — run auth locally (user has a TTY here)
+      p.log.info(
+        provider === "codex"
+          ? "No Codex credentials found. Running device auth now..."
+          : "No Claude Code credentials found. Running login now..."
+      );
+      try {
+        if (provider === "codex") {
+          execSync("codex login --device-auth", { stdio: "inherit", timeout: 300000 });
+        } else {
+          execSync("claude login", { stdio: "inherit", timeout: 300000 });
         }
-      } else {
-        try {
-          execSync("codex --version 2>/dev/null", { timeout: 5000, stdio: "pipe" });
-          s.stop("Opening Codex device auth...");
-          p.log.info("Complete the device auth in your browser.");
-          execSync("codex login --device-auth", { stdio: "inherit", timeout: 120000 });
-        } catch {
-          s.stop("Codex CLI not found. Install with: npm install -g @openai/codex");
-          process.exit(1);
-        }
+        p.log.success("Authenticated! Credentials will be uploaded to EFS during deploy.");
+      } catch {
+        p.log.error("Auth failed. You can re-run `citio` later to try again.");
+        process.exit(1);
       }
-    } catch (err) {
-      s.stop("Auth failed — falling back to API key.");
-      providerApiKey = (await p.password({
-        message: provider === "codex"
-          ? "Enter your OpenAI API key (OPENAI_API_KEY):"
-          : "Enter your Anthropic API key (ANTHROPIC_API_KEY):",
-      })) as string;
-      if (p.isCancel(providerApiKey)) process.exit(0);
     }
   } else {
     providerApiKey = (await p.password({
@@ -326,8 +313,8 @@ function writeConfigFile(config: InitConfig): void {
         ecr_repo: "citio",
         ecs_cluster: "citio",
         ecs_service: "citio",
-        task_cpu: 2048,
-        task_memory: 8192,
+        task_cpu: 1024,
+        task_memory: 4096,
         ephemeral_storage_gb: 100,
       },
     },
@@ -451,7 +438,8 @@ async function deployToAws(config: InitConfig): Promise<void> {
   // Auth is handled at RUNTIME via env vars in the ECS task definition,
   // never baked into the Docker image.
 
-  execSync("docker build -t citio:latest .", {
+  // Build for linux/amd64 (ECS Fargate requires it, even if building on ARM Mac)
+  execSync("docker build --platform linux/amd64 -t citio:latest .", {
     stdio: "pipe",
     timeout: 600000,
     cwd: projectDir,
@@ -519,6 +507,19 @@ async function deployToAws(config: InitConfig): Promise<void> {
       `aws iam attach-role-policy --role-name citio-task-execution --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy ${profileFlag} 2>/dev/null || true`,
       { encoding: "utf-8" }
     );
+    // Add CloudWatch Logs permissions (needed for awslogs-create-group)
+    const logsPolicy = JSON.stringify({
+      Version: "2012-10-17",
+      Statement: [{
+        Effect: "Allow",
+        Action: ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogStreams"],
+        Resource: "arn:aws:logs:*:*:*"
+      }]
+    });
+    execSync(
+      `aws iam put-role-policy --role-name citio-task-execution --policy-name citio-logs --policy-document '${logsPolicy}' ${profileFlag} 2>/dev/null || true`,
+      { encoding: "utf-8" }
+    );
   } catch {
     // Roles may already exist
   }
@@ -530,21 +531,30 @@ async function deployToAws(config: InitConfig): Promise<void> {
     { name: "SLACK_BOT_TOKEN", value: config.slackBotToken },
     { name: "SLACK_APP_TOKEN", value: config.slackAppToken },
     { name: "GH_TOKEN", value: config.githubToken },
-    { name: "CITIO_CONFIG", value: "/app/citio.yaml" },
   ];
 
-  if (config.provider === "codex") {
-    envVars.push({ name: "OPENAI_API_KEY", value: config.providerApiKey });
-  } else {
-    envVars.push({ name: "ANTHROPIC_API_KEY", value: config.providerApiKey });
+  // Embed config as base64 so it doesn't need a file mount
+  const configYaml = readFileSync("citio.yaml", "utf-8");
+  const configB64 = Buffer.from(configYaml).toString("base64");
+  envVars.push({ name: "CITIO_CONFIG_B64", value: configB64 });
+
+  if (config.authMethod === "api_key" && config.providerApiKey) {
+    if (config.provider === "codex") {
+      envVars.push({ name: "OPENAI_API_KEY", value: config.providerApiKey });
+    } else {
+      envVars.push({ name: "ANTHROPIC_API_KEY", value: config.providerApiKey });
+    }
+  } else if (config.authMethod === "oauth") {
+    // OAuth: credentials uploaded to EFS after deploy (see post-deploy section below)
+    // No CITIO_NEEDS_AUTH — container doesn't do interactive auth
   }
 
   const taskDef = {
     family: "citio",
     networkMode: "awsvpc",
     requiresCompatibilities: ["FARGATE"],
-    cpu: "2048",
-    memory: "8192",
+    cpu: "1024",
+    memory: "4096",
     ephemeralStorage: { sizeInGiB: 100 },
     executionRoleArn: `arn:aws:iam::${accountId}:role/citio-task-execution`,
     taskRoleArn: `arn:aws:iam::${accountId}:role/citio-task-execution`,
@@ -653,8 +663,163 @@ async function deployToAws(config: InitConfig): Promise<void> {
   }
   s.stop("ECS service deployed!");
 
-  p.log.success(
-    `\nCitio is deploying to ECS!\n\nMonitor: aws ecs describe-services --cluster citio --services citio --region ${region} ${profileFlag}\nLogs: aws logs tail /ecs/citio --region ${region} ${profileFlag} --follow`
+  p.log.success("ECS service deployed!");
+
+  // Post-deploy: upload local OAuth credentials to EFS via one-off Alpine task
+  if (config.authMethod === "oauth") {
+    const homeDir = process.env.HOME || "";
+    const localAuthPath = config.provider === "codex"
+      ? `${homeDir}/.codex/auth.json`
+      : `${homeDir}/.claude`;
+
+    if (existsSync(localAuthPath)) {
+      s.start("Uploading credentials to EFS...");
+      try {
+        const svcSubnet = execSync(
+          `aws ecs describe-services --cluster citio --services citio --region ${region} ${profileFlag} --query 'services[0].networkConfiguration.awsvpcConfiguration.subnets[0]' --output text`,
+          { encoding: "utf-8", stdio: "pipe" }
+        ).trim();
+        const svcSg = execSync(
+          `aws ecs describe-services --cluster citio --services citio --region ${region} ${profileFlag} --query 'services[0].networkConfiguration.awsvpcConfiguration.securityGroups[0]' --output text`,
+          { encoding: "utf-8", stdio: "pipe" }
+        ).trim();
+
+        let authB64: string;
+        let destPath: string;
+        if (config.provider === "codex") {
+          authB64 = Buffer.from(readFileSync(`${homeDir}/.codex/auth.json`, "utf-8")).toString("base64");
+          destPath = ".codex/auth.json";
+        } else {
+          // Claude: find main credential file
+          const credFiles = execSync(`find "${homeDir}/.claude" -maxdepth 1 -type f 2>/dev/null`, { encoding: "utf-8", stdio: "pipe" }).trim().split("\n").filter(Boolean);
+          const mainCred = credFiles[0] || `${homeDir}/.claude/credentials.json`;
+          authB64 = Buffer.from(readFileSync(mainCred, "utf-8")).toString("base64");
+          destPath = `.claude/${mainCred.split("/").pop()}`;
+        }
+
+        const destDir = destPath.split("/").slice(0, -1).join("/");
+        const efsTaskDef = JSON.stringify({
+          family: "citio-auth-setup",
+          networkMode: "awsvpc",
+          requiresCompatibilities: ["FARGATE"],
+          cpu: "256", memory: "512",
+          executionRoleArn: `arn:aws:iam::${accountId}:role/citio-task-execution`,
+          taskRoleArn: `arn:aws:iam::${accountId}:role/citio-task-execution`,
+          volumes: [{ name: "citio-home", efsVolumeConfiguration: { fileSystemId: efsId || "<EFS_ID>", rootDirectory: "/", transitEncryption: "ENABLED" } }],
+          containerDefinitions: [{ name: "auth-setup", image: "alpine:latest", essential: true,
+            command: ["sh", "-c", `mkdir -p /efs/${destDir} && echo '${authB64}' | base64 -d > /efs/${destPath} && chmod 600 /efs/${destPath} && echo AUTH_OK`],
+            mountPoints: [{ sourceVolume: "citio-home", containerPath: "/efs", readOnly: false }],
+            logConfiguration: { logDriver: "awslogs", options: { "awslogs-group": "/ecs/citio", "awslogs-region": region, "awslogs-stream-prefix": "auth-setup", "awslogs-create-group": "true" } }
+          }]
+        });
+
+        writeFileSync("/tmp/citio-auth-task.json", efsTaskDef);
+        const authRev = execSync(`aws ecs register-task-definition --cli-input-json file:///tmp/citio-auth-task.json --region ${region} ${profileFlag} --query 'taskDefinition.revision' --output text`, { encoding: "utf-8", stdio: "pipe" }).trim();
+        const authTaskArn = execSync(`aws ecs run-task --cluster citio --task-definition "citio-auth-setup:${authRev}" --launch-type FARGATE --network-configuration "awsvpcConfiguration={subnets=[${svcSubnet}],securityGroups=[${svcSg}],assignPublicIp=ENABLED}" --region ${region} ${profileFlag} --query 'tasks[0].taskArn' --output text`, { encoding: "utf-8", stdio: "pipe" }).trim();
+
+        // Wait for completion
+        for (let i = 0; i < 12; i++) {
+          execSync("sleep 10", { stdio: "pipe" });
+          const status = execSync(`aws ecs describe-tasks --cluster citio --tasks "${authTaskArn}" --region ${region} ${profileFlag} --query 'tasks[0].lastStatus' --output text`, { encoding: "utf-8", stdio: "pipe" }).trim();
+          if (status === "STOPPED") {
+            const code = execSync(`aws ecs describe-tasks --cluster citio --tasks "${authTaskArn}" --region ${region} ${profileFlag} --query 'tasks[0].containers[0].exitCode' --output text`, { encoding: "utf-8", stdio: "pipe" }).trim();
+            s.stop(code === "0" ? "Credentials uploaded to EFS!" : "Credential upload may have failed.");
+            break;
+          }
+        }
+
+        // Restart main service to pick up credentials
+        execSync(`aws ecs update-service --cluster citio --service citio --force-new-deployment --region ${region} ${profileFlag}`, { stdio: "pipe" });
+      } catch (err) {
+        s.stop("Could not upload credentials.");
+        p.log.warn(`Set ${config.provider === "codex" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY"} env var as fallback.`);
+      }
+    }
+  }
+
+  // Post-deploy verification
+  const verifyS = p.spinner();
+  verifyS.start("Waiting for ECS service to stabilize...");
+
+  let serviceHealthy = false;
+  const maxRetries = 12; // 12 x 15s = 3 minutes
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const serviceJson = execSync(
+        `aws ecs describe-services --cluster citio --services citio --region ${region} ${profileFlag} --query 'services[0].{status:status,running:runningCount,desired:desiredCount,events:events[0].message}' --output json`,
+        { encoding: "utf-8", stdio: "pipe" }
+      );
+      const svc = JSON.parse(serviceJson);
+
+      if (svc.running >= svc.desired && svc.running > 0) {
+        serviceHealthy = true;
+        break;
+      }
+
+      // Show what's happening
+      verifyS.message(`Task status: ${svc.running}/${svc.desired} running. ${svc.events || "Starting..."}`);
+    } catch {
+      // Service might not be queryable yet
+    }
+
+    // Wait 15 seconds before checking again
+    execSync("sleep 15", { stdio: "pipe" });
+  }
+
+  if (serviceHealthy) {
+    verifyS.stop("ECS service is running!");
+  } else {
+    verifyS.stop("ECS service not yet healthy.");
+
+    // Check for errors in logs
+    p.log.warn("The service may still be starting. Checking logs for errors...");
+    try {
+      const logs = execSync(
+        `aws logs filter-log-events --log-group-name /ecs/citio --region ${region} ${profileFlag} --limit 10 --query 'events[].message' --output text 2>/dev/null`,
+        { encoding: "utf-8", stdio: "pipe", timeout: 15000 }
+      );
+      if (logs.trim()) {
+        p.log.info("Recent logs:\n" + logs.trim());
+      }
+    } catch {
+      p.log.info("No logs available yet (log group may not exist until the task runs).");
+    }
+
+    // Check the task's stopped reason
+    try {
+      const stoppedReason = execSync(
+        `aws ecs describe-tasks --cluster citio --tasks $(aws ecs list-tasks --cluster citio --service-name citio --desired-status STOPPED --region ${region} ${profileFlag} --query 'taskArns[0]' --output text 2>/dev/null) --region ${region} ${profileFlag} --query 'tasks[0].stoppedReason' --output text 2>/dev/null`,
+        { encoding: "utf-8", stdio: "pipe", timeout: 15000 }
+      ).trim();
+      if (stoppedReason && stoppedReason !== "None") {
+        p.log.error(`Task stopped: ${stoppedReason}`);
+      }
+    } catch {
+      // No stopped tasks to inspect
+    }
+  }
+
+  // Codex device auth relay
+  if (config.authMethod === "oauth" && config.provider === "codex" && serviceHealthy) {
+    p.log.info("\nCodex needs device auth. Tailing logs for the auth URL...");
+    p.log.info("Look for a URL like https://login.openai.com/device and a code.");
+    p.log.info("Press Ctrl+C once you've completed auth in your browser.\n");
+    try {
+      execSync(
+        `aws logs tail /ecs/citio --region ${region} ${profileFlag} --follow --since 2m`,
+        { stdio: "inherit", timeout: 180000 }
+      );
+    } catch {
+      // Ctrl+C throws, that's expected
+    }
+  }
+
+  // Final status
+  p.log.success(serviceHealthy ? "\nCitio is live!" : "\nDeployment started.");
+  p.log.info(
+    `Monitor:  aws ecs describe-services --cluster citio --services citio --region ${region} ${profileFlag}` +
+    `\nLogs:     aws logs tail /ecs/citio --region ${region} ${profileFlag} --follow` +
+    `\nHealth:   Check the task's public IP on port 3001/healthz`
   );
 }
 
@@ -688,8 +853,13 @@ async function main(): Promise<void> {
   if (shouldDeploy) {
     await deployToAws(config);
   } else {
+    const authMount = config.authMethod === "oauth"
+      ? config.provider === "claude"
+        ? " -v ~/.claude:/home/citio/.claude:ro"
+        : " -v ~/.codex/auth.json:/home/citio/.codex/auth.json:ro"
+      : "";
     p.log.info(
-      "Skipping deploy. Run `citio init` again or deploy manually with:\n  docker build -t citio . && docker run --env-file .env citio"
+      `Skipping deploy. Run manually with:\n  docker build -t citio . && docker run --env-file .env${authMount} citio`
     );
   }
 
