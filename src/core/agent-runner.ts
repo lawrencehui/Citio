@@ -1,12 +1,12 @@
-import { spawn, execSync, type ChildProcess } from "child_process";
-import { writeFileSync, readFileSync, mkdirSync, existsSync } from "fs";
-import path from "path";
+import { spawn, type ChildProcess } from "child_process";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { CitioConfig } from "../config/schema.js";
 
 interface QueuedTask {
   prompt: string;
-  onOutput: (chunk: string) => void;
-  onComplete: (output: string, exitCode: number | null) => void;
+  threadId: string | null; // null = new conversation, string = continue
+  onComplete: (output: string, threadId: string) => void;
   onError: (error: Error) => void;
 }
 
@@ -14,80 +14,14 @@ export class AgentRunner {
   private config: CitioConfig;
   private queue: QueuedTask[] = [];
   private running = false;
-  private currentProcess: ChildProcess | null = null;
-  private sessionId: string | null = null; // null until first message creates one
   private workspacePath: string;
-  private mcpConfigPath: string;
+  private mcpClient: Client | null = null;
+  private mcpProcess: ChildProcess | null = null;
+  private threadMap = new Map<string, string>(); // slack_thread_ts → codex_thread_id
 
   constructor(config: CitioConfig, workspacePath: string) {
     this.config = config;
     this.workspacePath = workspacePath;
-    this.mcpConfigPath = this.generateMcpConfig();
-    this.registerCodexMcp();
-  }
-
-  private registerCodexMcp(): void {
-    // Register the Citio MCP server with Codex so it's available in exec calls
-    const mcpConfig = JSON.parse(readFileSync(this.mcpConfigPath, "utf-8"));
-    const server = mcpConfig.mcpServers?.citio;
-    if (!server) return;
-
-    try {
-      // Remove old registration if exists
-      execSync("codex mcp remove citio 2>/dev/null || true", { stdio: "pipe" });
-
-      const cmd = server.command;
-      const args = (server.args || [] as string[]).join(" ");
-      const envFlags = Object.entries(server.env || {} as Record<string, string>)
-        .map(([k, v]) => `--env ${k}=${v}`)
-        .join(" ");
-
-      execSync(`codex mcp add citio ${envFlags} -- ${cmd} ${args}`, { stdio: "pipe" });
-      console.log(JSON.stringify({ type: "codex_mcp_registered" }));
-    } catch (err) {
-      console.log(JSON.stringify({
-        type: "codex_mcp_register_failed",
-        error: err instanceof Error ? err.message : String(err),
-      }));
-    }
-  }
-
-  private generateMcpConfig(): string {
-    // Find the mcp-entry.js path (built or source)
-    const distEntry = path.resolve(process.cwd(), "dist/core/mcp-entry.js");
-    const srcEntry = path.resolve(process.cwd(), "src/core/mcp-entry.ts");
-
-    const configDir = "/tmp/citio";
-    mkdirSync(configDir, { recursive: true });
-    const configPath = `${configDir}/mcp-config.json`;
-
-    // Determine if running from dist or via tsx
-    const useTs = !existsSync(distEntry);
-    const mcpCommand = useTs ? "npx" : "node";
-    const mcpArgs = useTs ? ["tsx", srcEntry] : [distEntry];
-
-    const mcpConfig = {
-      mcpServers: {
-        citio: {
-          command: mcpCommand,
-          args: mcpArgs,
-          env: {
-            CITIO_CONFIG: process.env.CITIO_CONFIG || "citio.yaml",
-            CITIO_WORKSPACE: this.workspacePath,
-            CITIO_MEMORY: process.env.CITIO_MEMORY || "/memory",
-            // Pass through credentials ONLY to the MCP server, not the agent
-            GH_TOKEN: process.env.GH_TOKEN || "",
-            AWS_PROFILE: process.env.AWS_PROFILE || "",
-            AWS_DEFAULT_REGION: process.env.AWS_DEFAULT_REGION || "",
-            HOME: process.env.HOME || "",
-            PATH: process.env.PATH || "",
-          },
-        },
-      },
-    };
-
-    writeFileSync(configPath, JSON.stringify(mcpConfig, null, 2), "utf-8");
-    return configPath;
   }
 
   get queueLength(): number {
@@ -96,6 +30,49 @@ export class AgentRunner {
 
   get isRunning(): boolean {
     return this.running;
+  }
+
+  getThreadId(slackThreadTs: string): string | null {
+    return this.threadMap.get(slackThreadTs) || null;
+  }
+
+  async start(): Promise<void> {
+    const provider = this.config.engine.default_provider;
+
+    if (provider === "codex") {
+      await this.startCodexMcpServer();
+    } else {
+      await this.startClaudeMcpServer();
+    }
+  }
+
+  private async startCodexMcpServer(): Promise<void> {
+    const transport = new StdioClientTransport({
+      command: "codex",
+      args: [
+        "mcp-server",
+        "-c", `sandbox="danger-full-access"`,
+      ],
+      env: {
+        ...process.env,
+        HOME: process.env.HOME || "/home/citio",
+      },
+      cwd: this.workspacePath,
+    });
+
+    this.mcpClient = new Client({
+      name: "citio",
+      version: "0.1.0",
+    });
+
+    await this.mcpClient.connect(transport);
+    console.log(JSON.stringify({ type: "codex_mcp_server_started" }));
+  }
+
+  private async startClaudeMcpServer(): Promise<void> {
+    // For Claude Code, use the existing -p approach as fallback
+    // TODO: check if Claude Code has an mcp-server mode
+    console.log(JSON.stringify({ type: "claude_direct_mode" }));
   }
 
   async submit(task: QueuedTask): Promise<void> {
@@ -115,174 +92,151 @@ export class AgentRunner {
       task.onError(err instanceof Error ? err : new Error(String(err)));
     } finally {
       this.running = false;
-      this.currentProcess = null;
-      // Process next in queue
       this.processQueue();
     }
   }
 
-  private runTask(task: QueuedTask): Promise<void> {
-    return new Promise<void>((resolve) => {
-      const provider = this.config.engine.default_provider;
+  private async runTask(task: QueuedTask): Promise<void> {
+    const provider = this.config.engine.default_provider;
 
-      // Pass through the full env so the agent can use CLI tools (aws, gh, git, etc.)
-      // TODO: once MCP tools are fully wired, strip back to minimal env and route
-      // privileged operations through MCP tools for credential isolation.
-      const env: Record<string, string> = { ...process.env } as Record<string, string>;
+    if (provider === "codex" && this.mcpClient) {
+      await this.runCodexTask(task);
+    } else {
+      await this.runClaudeTask(task);
+    }
+  }
 
-      // Agent needs its own API key to call the LLM (Claude/OpenAI), but NOT infra creds
-      if (provider === "claude") {
-        // Claude Code uses OAuth credentials from ~/.claude/ — pass HOME so it can find them
-        const apiKey = this.config.engine.providers.claude?.api_key;
-        if (apiKey && !apiKey.startsWith("$")) {
-          env.ANTHROPIC_API_KEY = apiKey;
-        }
+  private async runCodexTask(task: QueuedTask): Promise<void> {
+    if (!this.mcpClient) throw new Error("Codex MCP server not started");
+
+    console.log(JSON.stringify({
+      type: "agent_task",
+      provider: "codex",
+      threadId: task.threadId,
+      queue_remaining: this.queue.length,
+      prompt_preview: task.prompt.slice(0, 100),
+    }));
+
+    try {
+      let result;
+      if (task.threadId) {
+        // Continue existing conversation
+        result = await this.mcpClient.callTool({
+          name: "codex-reply",
+          arguments: {
+            threadId: task.threadId,
+            prompt: task.prompt,
+          },
+        });
       } else {
-        const apiKey = this.config.engine.providers.codex?.api_key;
-        if (apiKey && !apiKey.startsWith("$")) {
-          env.OPENAI_API_KEY = apiKey;
-        }
+        // New conversation
+        result = await this.mcpClient.callTool({
+          name: "codex",
+          arguments: {
+            prompt: task.prompt,
+            cwd: this.workspacePath,
+            sandbox: "danger-full-access",
+          },
+        });
       }
 
-      const args = this.buildArgs(provider, task.prompt);
+      // Extract content and threadId from result
+      const content = result.content as Array<{ type: string; text?: string }>;
+      const textContent = content
+        .filter((c) => c.type === "text" && c.text)
+        .map((c) => c.text!)
+        .join("\n");
+
+      // Parse threadId from the structured output
+      let threadId = task.threadId || "";
+      try {
+        const parsed = JSON.parse(textContent);
+        if (parsed.threadId) threadId = parsed.threadId;
+        task.onComplete(parsed.content || textContent, threadId);
+      } catch {
+        // Plain text response
+        task.onComplete(textContent, threadId);
+      }
 
       console.log(JSON.stringify({
-        type: "agent_spawn",
-        provider,
-        session_id: this.sessionId,
-        queue_remaining: this.queue.length,
-        prompt_preview: task.prompt.slice(0, 100),
+        type: "agent_complete",
+        threadId,
+        output_length: textContent.length,
       }));
+    } catch (err) {
+      console.log(JSON.stringify({
+        type: "agent_error",
+        error: err instanceof Error ? err.message : String(err),
+      }));
+      throw err;
+    }
+  }
 
-      const child = spawn(
-        provider === "claude" ? "claude" : "codex",
-        args,
-        {
-          cwd: this.workspacePath,
-          stdio: ["pipe", "pipe", "pipe"],
-          detached: true,
-          env,
-        }
-      );
+  private async runClaudeTask(task: QueuedTask): Promise<void> {
+    // Fallback: spawn claude -p for Claude Code
+    return new Promise<void>((resolve, reject) => {
+      const args = [
+        "-p", task.prompt,
+        "--output-format", "text",
+        "--dangerously-skip-permissions",
+      ];
 
-      this.currentProcess = child;
-
-      if (!child.pid) {
-        task.onError(new Error("Failed to spawn agent process"));
-        resolve();
-        return;
-      }
+      const child = spawn("claude", args, {
+        cwd: this.workspacePath,
+        stdio: ["pipe", "pipe", "pipe"],
+        env: { ...process.env },
+      });
 
       let output = "";
 
       child.stdout?.on("data", (data: Buffer) => {
-        const chunk = data.toString();
-        output += chunk;
-        task.onOutput(chunk);
+        output += data.toString();
       });
 
       child.stderr?.on("data", (data: Buffer) => {
-        const stderr = data.toString();
         console.log(JSON.stringify({
           type: "agent_stderr",
-          session_id: this.sessionId,
-          data: stderr.slice(0, 500),
+          data: data.toString().slice(0, 500),
         }));
-
-        // Capture session ID from Claude Code's first run
-        // Claude Code outputs: "Session ID: <uuid>" or similar
-        if (!this.sessionId) {
-          const uuidMatch = stderr.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
-          if (uuidMatch) {
-            this.sessionId = uuidMatch[1];
-            console.log(JSON.stringify({
-              type: "session_captured",
-              session_id: this.sessionId,
-            }));
-          }
-        }
       });
 
       child.on("exit", (code) => {
-        console.log(JSON.stringify({
-          type: "agent_exit",
-          session_id: this.sessionId,
-          exit_code: code,
-          output_length: output.length,
-        }));
-        task.onComplete(output, code);
-        resolve();
+        if (code === 0 || output.length > 0) {
+          task.onComplete(output, "");
+          resolve();
+        } else {
+          task.onError(new Error(`Agent exited with code ${code}`));
+          resolve();
+        }
       });
 
       child.on("error", (err) => {
-        console.log(JSON.stringify({
-          type: "agent_error",
-          session_id: this.sessionId,
-          error: err.message,
-        }));
         task.onError(err);
         resolve();
       });
 
-      // Wall-clock timeout
+      // Timeout
       const timeoutMs = this.config.engine.max_session_duration_minutes * 60 * 1000;
       setTimeout(() => {
-        if (child.exitCode === null && child.pid) {
-          console.log(JSON.stringify({
-            type: "agent_timeout",
-            session_id: this.sessionId,
-            timeout_ms: timeoutMs,
-          }));
-          try {
-            process.kill(-child.pid, "SIGTERM");
-            setTimeout(() => {
-              try { if (child.pid) process.kill(-child.pid, "SIGKILL"); } catch { /* already dead */ }
-            }, 10000);
-          } catch {
-            try { child.kill("SIGKILL"); } catch { /* already dead */ }
-          }
+        if (child.exitCode === null) {
+          child.kill("SIGTERM");
+          setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 10000);
         }
       }, timeoutMs);
     });
   }
 
-  private buildArgs(provider: string, prompt: string): string[] {
-    if (provider === "claude") {
-      const args = [
-        "-p", prompt,
-        "--output-format", "text",
-        "--dangerously-skip-permissions",
-        "--mcp-config", this.mcpConfigPath,
-      ];
-      // Only resume after first message has created a session
-      if (this.sessionId) {
-        args.push("--resume", this.sessionId);
-      }
-      return args;
-    } else {
-      return ["exec", prompt, "--full-auto", "--skip-git-repo-check", "-s", "danger-full-access"];
-    }
-  }
-
   async shutdown(): Promise<void> {
-    // Clear the queue
     for (const task of this.queue) {
       task.onError(new Error("Agent shutting down"));
     }
     this.queue = [];
 
-    // Kill current process
-    if (this.currentProcess && this.currentProcess.exitCode === null && this.currentProcess.pid) {
-      const pid = this.currentProcess.pid;
-      try {
-        process.kill(-pid, "SIGTERM");
-        await new Promise<void>((r) => setTimeout(r, 5000));
-        if (this.currentProcess.exitCode === null) {
-          process.kill(-pid, "SIGKILL");
-        }
-      } catch {
-        try { this.currentProcess.kill("SIGKILL"); } catch { /* already dead */ }
-      }
+    if (this.mcpClient) {
+      try { await this.mcpClient.close(); } catch {}
+    }
+    if (this.mcpProcess) {
+      try { this.mcpProcess.kill("SIGTERM"); } catch {}
     }
   }
 }

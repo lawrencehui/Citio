@@ -165,27 +165,14 @@ export class SlackAdapter {
             // Continue without
           }
 
-          let lastUpdateTime = Date.now();
-          let updateCount = 0;
+          // Get existing thread mapping (for conversation continuity)
+          const existingThreadId = this.agentRunner.getThreadId(thread_ts);
 
-          // Submit to the shared agent runner (queued, one at a time, session resumed)
+          // Submit to the agent (single queue, Codex MCP server handles the rest)
           await this.agentRunner.submit({
             prompt,
-            onOutput: (chunk) => {
-              const now = Date.now();
-              const interval = updateCount < 40 ? 3000 : updateCount < 60 ? 15000 : 30000;
-              if (thinkingTs && now - lastUpdateTime >= interval) {
-                lastUpdateTime = now;
-                updateCount++;
-                const redacted = redactCredentials(chunk);
-                client.chat.update({
-                  channel,
-                  ts: thinkingTs,
-                  text: redacted.slice(-3800) || ":hourglass: Still working...",
-                }).catch(() => {});
-              }
-            },
-            onComplete: async (output, exitCode) => {
+            threadId: existingThreadId,
+            onComplete: async (output, codexThreadId) => {
               const finalOutput = redactCredentials(output);
               try {
                 const truncated = finalOutput.length > 3900
@@ -200,10 +187,6 @@ export class SlackAdapter {
                   });
                 } else {
                   await say(truncated || "Task completed (no output).");
-                }
-
-                if (exitCode !== 0 && exitCode !== null) {
-                  await say(`Agent exited with code ${exitCode}. The task may be incomplete.`);
                 }
               } catch {
                 try { await say(finalOutput.slice(-3900) || "Task completed."); } catch { /* give up */ }

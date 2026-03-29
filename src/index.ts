@@ -46,8 +46,9 @@ async function main(): Promise<void> {
   const workspace = new WorkspaceManager(config, workspacePath);
   await workspace.initialize();
 
-  // Initialize agent runner (single queue, one process at a time, session resume)
+  // Initialize agent runner (long-running MCP server for Codex, or -p for Claude)
   const agentRunner = new AgentRunner(config, workspacePath);
+  await agentRunner.start();
 
   // Health check server
   const healthServer = createServer((req, res) => {
