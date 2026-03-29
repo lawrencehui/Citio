@@ -185,17 +185,58 @@ async function collectConfig(): Promise<InitConfig> {
   })) as string;
   if (p.isCancel(githubToken)) process.exit(0);
 
-  // Repos
-  const repoInput = (await p.text({
-    message: "Repository URL(s) (comma-separated):",
-    placeholder: "https://github.com/org/repo.git",
-  })) as string;
-  if (p.isCancel(repoInput)) process.exit(0);
+  // Repos — fetch available repos from GitHub using the PAT
+  let repos: Array<{ url: string; branch: string }> = [];
+  const repoSpinner = p.spinner();
+  repoSpinner.start("Fetching repos your token has access to...");
 
-  const repos = repoInput.split(",").map((url) => ({
-    url: url.trim(),
-    branch: "main",
-  }));
+  try {
+    // List repos accessible by the token (handles both classic and fine-grained PATs)
+    const repoJson = execSync(
+      `curl -s -H "Authorization: token ${githubToken}" "https://api.github.com/user/repos?per_page=100&sort=updated&affiliation=owner,collaborator,organization_member" 2>/dev/null`,
+      { encoding: "utf-8", timeout: 15000 }
+    );
+    const repoList = JSON.parse(repoJson) as Array<{ full_name: string; clone_url: string; default_branch: string; private: boolean; updated_at: string }>;
+
+    if (Array.isArray(repoList) && repoList.length > 0) {
+      repoSpinner.stop(`Found ${repoList.length} repos`);
+
+      const selectedRepos = (await p.multiselect({
+        message: "Select repos for Citio to work on (use space to select, enter to confirm):",
+        options: repoList.slice(0, 50).map((r) => ({
+          value: r.clone_url,
+          label: r.full_name,
+          hint: `${r.private ? "private" : "public"} · ${r.default_branch} · updated ${r.updated_at.split("T")[0]}`,
+        })),
+        required: true,
+      })) as string[];
+
+      if (p.isCancel(selectedRepos)) process.exit(0);
+
+      repos = selectedRepos.map((url) => {
+        const match = repoList.find((r) => r.clone_url === url);
+        return { url, branch: match?.default_branch || "main" };
+      });
+    } else {
+      repoSpinner.stop("No repos found (token may not have repo access)");
+    }
+  } catch {
+    repoSpinner.stop("Could not fetch repos from GitHub");
+  }
+
+  // Fallback to manual entry if auto-fetch failed or returned nothing
+  if (repos.length === 0) {
+    const repoInput = (await p.text({
+      message: "Repository URL(s) (comma-separated):",
+      placeholder: "https://github.com/org/repo.git",
+    })) as string;
+    if (p.isCancel(repoInput)) process.exit(0);
+
+    repos = repoInput.split(",").map((url) => ({
+      url: url.trim(),
+      branch: "main",
+    }));
+  }
 
   // Rules
   const rulesInput = (await p.text({

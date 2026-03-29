@@ -1,5 +1,5 @@
-import { spawn, type ChildProcess } from "child_process";
-import { writeFileSync, mkdirSync, existsSync } from "fs";
+import { spawn, execSync, type ChildProcess } from "child_process";
+import { writeFileSync, readFileSync, mkdirSync, existsSync } from "fs";
 import path from "path";
 import type { CitioConfig } from "../config/schema.js";
 
@@ -23,6 +23,33 @@ export class AgentRunner {
     this.config = config;
     this.workspacePath = workspacePath;
     this.mcpConfigPath = this.generateMcpConfig();
+    this.registerCodexMcp();
+  }
+
+  private registerCodexMcp(): void {
+    // Register the Citio MCP server with Codex so it's available in exec calls
+    const mcpConfig = JSON.parse(readFileSync(this.mcpConfigPath, "utf-8"));
+    const server = mcpConfig.mcpServers?.citio;
+    if (!server) return;
+
+    try {
+      // Remove old registration if exists
+      execSync("codex mcp remove citio 2>/dev/null || true", { stdio: "pipe" });
+
+      const cmd = server.command;
+      const args = (server.args || [] as string[]).join(" ");
+      const envFlags = Object.entries(server.env || {} as Record<string, string>)
+        .map(([k, v]) => `--env ${k}=${v}`)
+        .join(" ");
+
+      execSync(`codex mcp add citio ${envFlags} -- ${cmd} ${args}`, { stdio: "pipe" });
+      console.log(JSON.stringify({ type: "codex_mcp_registered" }));
+    } catch (err) {
+      console.log(JSON.stringify({
+        type: "codex_mcp_register_failed",
+        error: err instanceof Error ? err.message : String(err),
+      }));
+    }
   }
 
   private generateMcpConfig(): string {
@@ -98,16 +125,10 @@ export class AgentRunner {
     return new Promise<void>((resolve) => {
       const provider = this.config.engine.default_provider;
 
-      // Agent gets a STRIPPED env: only what it needs to run, no credentials.
-      // Credentials live in the MCP server process, not the agent.
-      const env: Record<string, string> = {
-        HOME: process.env.HOME || "",
-        PATH: process.env.PATH || "",
-        USER: process.env.USER || "",
-        SHELL: process.env.SHELL || "",
-        TERM: process.env.TERM || "xterm-256color",
-        LANG: process.env.LANG || "en_US.UTF-8",
-      };
+      // Pass through the full env so the agent can use CLI tools (aws, gh, git, etc.)
+      // TODO: once MCP tools are fully wired, strip back to minimal env and route
+      // privileged operations through MCP tools for credential isolation.
+      const env: Record<string, string> = { ...process.env } as Record<string, string>;
 
       // Agent needs its own API key to call the LLM (Claude/OpenAI), but NOT infra creds
       if (provider === "claude") {
@@ -239,7 +260,7 @@ export class AgentRunner {
       }
       return args;
     } else {
-      return ["exec", prompt, "--full-auto", "--skip-git-repo-check"];
+      return ["exec", prompt, "--full-auto", "--skip-git-repo-check", "-s", "danger-full-access"];
     }
   }
 
