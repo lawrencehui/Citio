@@ -239,7 +239,7 @@ export class AgentRunner {
       }
       return args;
     } else {
-      return ["-q", prompt, "--full-auto"];
+      return ["exec", prompt, "--full-auto"];
     }
   }
 
