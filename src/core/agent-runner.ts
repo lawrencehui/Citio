@@ -239,7 +239,7 @@ export class AgentRunner {
       }
       return args;
     } else {
-      return ["exec", prompt, "--full-auto"];
+      return ["exec", prompt, "--full-auto", "--skip-git-repo-check"];
     }
   }
 

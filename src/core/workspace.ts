@@ -19,6 +19,16 @@ export class WorkspaceManager {
   async initialize(): Promise<void> {
     mkdirSync(this.workspacePath, { recursive: true });
 
+    // Ensure workspace is a git repo (Codex requires it)
+    if (!existsSync(path.join(this.workspacePath, ".git"))) {
+      try {
+        execSync("git init", { cwd: this.workspacePath, stdio: "pipe" });
+        console.log(JSON.stringify({ type: "workspace_git_init" }));
+      } catch {
+        // Non-fatal
+      }
+    }
+
     for (const repo of this.config.workspace.repos) {
       const repoName = this.extractRepoName(repo.url);
       const repoPath = path.join(this.workspacePath, repoName);
