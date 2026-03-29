@@ -101,13 +101,14 @@ export class SlackAdapter {
           thread_ts,
         }));
 
-        // Auth check
+        // DM auth check — only admin_users can DM the bot
         if (
           userId &&
-          this.config.slack.authorized_users.length > 0 &&
-          !this.config.slack.authorized_users.includes(userId)
+          this.config.slack.admin_users &&
+          this.config.slack.admin_users.length > 0 &&
+          !this.config.slack.admin_users.includes(userId)
         ) {
-          await say("Sorry, you don't have permission to use Citio.");
+          await say("DMs are restricted. Please @mention me in the team channel instead.");
           return;
         }
 
@@ -205,21 +206,84 @@ export class SlackAdapter {
 
     this.app.assistant(assistant);
 
-    // Also listen to @mentions in channels (not just DMs)
-    this.app.event("app_mention", async ({ event, say }) => {
+    // Handle @mentions in channels — work directly in the channel thread
+    this.app.event("app_mention", async ({ event, client }) => {
+      const userId = event.user;
+      const text = (event.text || "").replace(/<@[A-Z0-9]+>/g, "").trim();
+      const channel = event.channel;
+      const threadTs = event.thread_ts || event.ts;
+
       console.log(JSON.stringify({
         type: "app_mention",
-        user: event.user,
-        text: (event.text || "").slice(0, 100),
-        channel: event.channel,
+        user: userId,
+        text: text.slice(0, 100),
+        channel,
       }));
 
-      const text = (event.text || "").replace(/<@[A-Z0-9]+>/g, "").trim();
       if (!text) return;
 
-      await say({
-        text: `Got it! I'll work on this. Open a DM with me for the full agent experience with streaming and suggested prompts.`,
-        thread_ts: event.thread_ts || event.ts,
+      // Auth check — only authorized users can use in channels
+      if (
+        userId &&
+        this.config.slack.authorized_users &&
+        this.config.slack.authorized_users.length > 0 &&
+        !this.config.slack.authorized_users.includes(userId)
+      ) {
+        return; // Silent ignore
+      }
+
+      // Post thinking message directly in channel (not in thread)
+      let thinkingTs: string | undefined;
+      try {
+        const msg = await client.chat.postMessage({
+          channel,
+          text: ":hourglass: Working on it...",
+        });
+        thinkingTs = msg.ts ?? undefined;
+      } catch {
+        // Continue without
+      }
+
+      const existingThreadId = this.agentRunner.getThreadId(threadTs);
+      const prompt = this.buildPrompt(text, "");
+
+      await this.agentRunner.submit({
+        prompt,
+        threadId: existingThreadId,
+        onComplete: async (output, codexThreadId) => {
+          const finalOutput = redactCredentials(output);
+          try {
+            const truncated = finalOutput.length > 3900
+              ? finalOutput.slice(-3900) + "\n\n_(output truncated)_"
+              : finalOutput;
+
+            if (thinkingTs) {
+              await client.chat.update({
+                channel,
+                ts: thinkingTs,
+                text: truncated || "Done (no output).",
+              });
+            } else {
+              await client.chat.postMessage({
+                channel,
+                text: truncated || "Done (no output).",
+              });
+            }
+          } catch {
+            try {
+              await client.chat.postMessage({
+                channel,
+                text: finalOutput.slice(-3900) || "Done.",
+              });
+            } catch { /* give up */ }
+          }
+        },
+        onError: async (err) => {
+          await client.chat.postMessage({
+            channel,
+            text: `Sorry, something went wrong: ${err.message}`,
+          });
+        },
       });
     });
   }

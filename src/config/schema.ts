@@ -12,7 +12,8 @@ export const CitioConfigSchema = z.object({
     bot_token: z.string(),
     app_token: z.string(),
     channel_id: z.string().optional(),
-    authorized_users: z.array(z.string()).default([]),
+    authorized_users: z.array(z.string()).default([]),  // who can @mention in channels (empty = all)
+    admin_users: z.array(z.string()).default([]),        // who can DM the bot (empty = all)
   }),
 
   engine: z.object({
