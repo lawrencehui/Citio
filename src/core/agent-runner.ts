@@ -216,9 +216,10 @@ export class AgentRunner {
       const args = [
         "--bare",
         "-p", task.prompt,
-        "--output-format", "text",
+        "--output-format", "stream-json",
         "--dangerously-skip-permissions",
         "--model", model,
+        "--verbose",
       ];
 
       const child = spawn("claude", args, {
@@ -228,11 +229,49 @@ export class AgentRunner {
       });
 
       let output = "";
+      let finalResult = "";
+      let progressText = "";
+      let lineBuffer = "";
 
       child.stdout?.on("data", (data: Buffer) => {
-        const chunk = data.toString();
-        output += chunk;
-        if (task.onProgress) task.onProgress(chunk);
+        lineBuffer += data.toString();
+        const lines = lineBuffer.split("\n");
+        lineBuffer = lines.pop() || ""; // keep incomplete last line
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const event = JSON.parse(line);
+
+            // Extract text from different event types
+            if (event.type === "assistant" && event.message?.content) {
+              for (const block of event.message.content) {
+                if (block.type === "text") {
+                  finalResult += block.text;
+                }
+              }
+            } else if (event.type === "content_block_delta" && event.delta?.text) {
+              finalResult += event.delta.text;
+              if (task.onProgress) task.onProgress(event.delta.text);
+            } else if (event.type === "result" && event.result) {
+              // Final result event
+              finalResult = event.result;
+            } else if (event.type === "tool_use" || (event.type === "content_block_start" && event.content_block?.type === "tool_use")) {
+              // Tool usage — show as progress
+              const toolName = event.name || event.content_block?.name || "tool";
+              progressText = `Using ${toolName}...`;
+              if (task.onProgress) task.onProgress(progressText);
+            } else if (event.type === "tool_result") {
+              const result = typeof event.content === "string" ? event.content : JSON.stringify(event.content);
+              progressText = result.slice(0, 200);
+              if (task.onProgress) task.onProgress(progressText);
+            }
+          } catch {
+            // Not JSON, treat as plain text
+            output += line + "\n";
+            if (task.onProgress) task.onProgress(line);
+          }
+        }
       });
 
       child.stderr?.on("data", (data: Buffer) => {
@@ -243,8 +282,9 @@ export class AgentRunner {
       });
 
       child.on("exit", (code) => {
-        if (code === 0 || output.length > 0) {
-          task.onComplete(output, "");
+        const result = finalResult || output;
+        if (code === 0 || result.length > 0) {
+          task.onComplete(result, "");
           resolve();
         } else {
           task.onError(new Error(`Agent exited with code ${code}`));
