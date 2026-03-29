@@ -19,6 +19,20 @@ export class WorkspaceManager {
   async initialize(): Promise<void> {
     mkdirSync(this.workspacePath, { recursive: true });
 
+    // Configure git to use GH_TOKEN for HTTPS clones
+    const ghToken = process.env.GH_TOKEN;
+    if (ghToken) {
+      try {
+        execSync(
+          `git config --global credential.helper '!f() { echo "username=oauth2"; echo "password=${ghToken}"; }; f'`,
+          { stdio: "pipe" }
+        );
+        console.log(JSON.stringify({ type: "git_credential_configured" }));
+      } catch {
+        // Non-fatal, try URL injection as fallback
+      }
+    }
+
     // Ensure workspace is a git repo (Codex requires it)
     if (!existsSync(path.join(this.workspacePath, ".git"))) {
       try {
@@ -32,6 +46,11 @@ export class WorkspaceManager {
     for (const repo of this.config.workspace.repos) {
       const repoName = this.extractRepoName(repo.url);
       const repoPath = path.join(this.workspacePath, repoName);
+
+      // Inject token into URL as fallback for credential helper
+      const cloneUrl = ghToken
+        ? repo.url.replace("https://github.com/", `https://${ghToken}@github.com/`)
+        : repo.url;
 
       if (existsSync(repoPath)) {
         console.log(
@@ -64,13 +83,26 @@ export class WorkspaceManager {
             url: repo.url,
           })
         );
-        execSync(
-          `git clone --depth 1 --branch "${repo.branch}" "${repo.url}" "${repoPath}"`,
-          {
-            encoding: "utf-8",
-            timeout: 300000,
-          }
-        );
+        try {
+          execSync(
+            `git clone --depth 1 --branch "${repo.branch}" "${cloneUrl}" "${repoPath}"`,
+            {
+              encoding: "utf-8",
+              timeout: 300000,
+              env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+            }
+          );
+        } catch (err) {
+          console.log(
+            JSON.stringify({
+              type: "workspace_clone_failed",
+              repo: repoName,
+              error: err instanceof Error ? err.message : String(err),
+            })
+          );
+          // Don't crash — continue with other repos
+          continue;
+        }
       }
     }
 

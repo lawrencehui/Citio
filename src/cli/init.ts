@@ -81,7 +81,7 @@ async function collectConfig(): Promise<InitConfig> {
       {
         value: "codex",
         label: "Codex (OpenAI)",
-        hint: "recommended",
+        hint: "OpenAI / ChatGPT Plus",
       },
       {
         value: "claude",
