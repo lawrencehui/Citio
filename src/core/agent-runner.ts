@@ -8,6 +8,7 @@ import type { CitioConfig } from "../config/schema.js";
 interface QueuedTask {
   prompt: string;
   threadId: string | null; // null = new conversation, string = continue
+  onProgress?: (chunk: string) => void;
   onComplete: (output: string, threadId: string) => void;
   onError: (error: Error) => void;
 }
@@ -229,7 +230,9 @@ export class AgentRunner {
       let output = "";
 
       child.stdout?.on("data", (data: Buffer) => {
-        output += data.toString();
+        const chunk = data.toString();
+        output += chunk;
+        if (task.onProgress) task.onProgress(chunk);
       });
 
       child.stderr?.on("data", (data: Buffer) => {

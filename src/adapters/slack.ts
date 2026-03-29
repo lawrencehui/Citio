@@ -169,10 +169,26 @@ export class SlackAdapter {
           // Get existing thread mapping (for conversation continuity)
           const existingThreadId = this.agentRunner.getThreadId(thread_ts);
 
-          // Submit to the agent (single queue, Codex MCP server handles the rest)
+          // Submit to the agent
+          let dmLastUpdate = Date.now();
+          let dmAccOutput = "";
+
           await this.agentRunner.submit({
             prompt,
             threadId: existingThreadId,
+            onProgress: (chunk) => {
+              dmAccOutput += chunk;
+              const now = Date.now();
+              if (thinkingTs && now - dmLastUpdate >= 5000) {
+                dmLastUpdate = now;
+                const preview = redactCredentials(dmAccOutput).slice(-3800);
+                client.chat.update({
+                  channel,
+                  ts: thinkingTs,
+                  text: preview || ":hourglass: Still working...",
+                }).catch(() => {});
+              }
+            },
             onComplete: async (output, codexThreadId) => {
               const finalOutput = redactCredentials(output);
               try {
@@ -247,9 +263,26 @@ export class SlackAdapter {
       const existingThreadId = this.agentRunner.getThreadId(threadTs);
       const prompt = this.buildPrompt(text, "");
 
+      let lastUpdateTime = Date.now();
+      let accumulatedOutput = "";
+
       await this.agentRunner.submit({
         prompt,
         threadId: existingThreadId,
+        onProgress: (chunk) => {
+          accumulatedOutput += chunk;
+          const now = Date.now();
+          // Update thinking message every 5 seconds with latest output
+          if (thinkingTs && now - lastUpdateTime >= 5000) {
+            lastUpdateTime = now;
+            const preview = redactCredentials(accumulatedOutput).slice(-3800);
+            client.chat.update({
+              channel,
+              ts: thinkingTs,
+              text: preview || ":hourglass: Still working...",
+            }).catch(() => {});
+          }
+        },
         onComplete: async (output, codexThreadId) => {
           const finalOutput = redactCredentials(output);
           try {
