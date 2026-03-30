@@ -4,6 +4,7 @@ import { execSync } from "child_process";
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from "fs";
 import path from "path";
 import { stringify } from "yaml";
+import { buildClaudeAuthArchive, hasClaudeLoginState, resolvePortableClaudeAuth } from "../utils/claude.js";
 
 interface InitConfig {
   provider: "codex" | "claude";
@@ -73,6 +74,50 @@ function checkPrerequisites(): void {
   }
 }
 
+function ensurePortableClaudeAuth(homeDir: string): void {
+  if (!hasClaudeLoginState(homeDir)) {
+    p.log.info("No Claude Code login detected. Running `claude auth login` now...");
+    try {
+      execSync("claude auth login", { stdio: "inherit", timeout: 300000 });
+    } catch {
+      p.log.error("Claude login failed. You can re-run `citio` later to try again.");
+      process.exit(1);
+    }
+  }
+
+  let portableAuth = resolvePortableClaudeAuth(homeDir);
+  if (portableAuth) {
+    p.log.success(
+      `Verified portable Claude auth via ${portableAuth.files.join(", ")}. These files will be uploaded to EFS.`
+    );
+    return;
+  }
+
+  p.log.info(
+    "Claude is logged in locally, but the current auth state is not portable to ECS yet. Running `claude setup-token` to create a long-lived token..."
+  );
+
+  try {
+    execSync("claude setup-token", { stdio: "inherit", timeout: 300000 });
+  } catch {
+    p.log.error("`claude setup-token` failed. Re-run `citio` later or use API key auth.");
+    process.exit(1);
+  }
+
+  portableAuth = resolvePortableClaudeAuth(homeDir);
+  if (!portableAuth) {
+    p.log.error(
+      "Claude auth is still not portable after `claude setup-token`. The installer cannot safely deploy Claude OAuth to ECS from this machine yet."
+    );
+    p.log.info("Use API key auth for now, or re-run the installer after verifying `claude -p` works from a clean HOME.");
+    process.exit(1);
+  }
+
+  p.log.success(
+    `Verified portable Claude auth via ${portableAuth.files.join(", ")}. These files will be uploaded to EFS.`
+  );
+}
+
 async function collectConfig(): Promise<InitConfig> {
   // Provider selection
   const provider = (await p.select({
@@ -100,7 +145,7 @@ async function collectConfig(): Promise<InitConfig> {
         value: "oauth",
         label: "OAuth login (recommended)",
         hint: provider === "claude"
-          ? "runs 'claude login' — uses your Claude Pro/Max subscription"
+          ? "runs 'claude auth login' and, if needed, 'claude setup-token' for a portable long-lived token"
           : "runs 'codex login --device-auth' — uses your OpenAI account",
       },
       {
@@ -119,9 +164,11 @@ async function collectConfig(): Promise<InitConfig> {
     const homeDir = process.env.HOME || "";
     const authPath = provider === "codex"
       ? `${homeDir}/.codex/auth.json`
-      : `${homeDir}/.claude`;
+      : `${homeDir}/.claude.json`;
 
-    if (existsSync(authPath)) {
+    if (provider === "claude") {
+      ensurePortableClaudeAuth(homeDir);
+    } else if (existsSync(authPath)) {
       p.log.success(
         `Found existing ${provider === "codex" ? "Codex" : "Claude Code"} credentials at ${authPath}. ` +
         `These will be uploaded to EFS during deploy.`
@@ -137,7 +184,8 @@ async function collectConfig(): Promise<InitConfig> {
         if (provider === "codex") {
           execSync("codex login --device-auth", { stdio: "inherit", timeout: 300000 });
         } else {
-          execSync("claude login", { stdio: "inherit", timeout: 300000 });
+          execSync("claude auth login", { stdio: "inherit", timeout: 300000 });
+          ensurePortableClaudeAuth(homeDir);
         }
         p.log.success("Authenticated! Credentials will be uploaded to EFS during deploy.");
       } catch {
@@ -725,11 +773,11 @@ async function deployToAws(config: InitConfig): Promise<void> {
   // Post-deploy: upload local OAuth credentials to EFS via one-off Alpine task
   if (config.authMethod === "oauth") {
     const homeDir = process.env.HOME || "";
-    const localAuthPath = config.provider === "codex"
-      ? `${homeDir}/.codex/auth.json`
-      : `${homeDir}/.claude`;
+    const hasLocalAuth = config.provider === "codex"
+      ? existsSync(`${homeDir}/.codex/auth.json`)
+      : hasClaudeLoginState(homeDir);
 
-    if (existsSync(localAuthPath)) {
+    if (hasLocalAuth) {
       s.start("Uploading credentials to EFS...");
       try {
         const svcSubnet = execSync(
@@ -742,19 +790,19 @@ async function deployToAws(config: InitConfig): Promise<void> {
         ).trim();
 
         let authB64: string;
-        let destPath: string;
+        let uploadCommand: string;
         if (config.provider === "codex") {
           authB64 = Buffer.from(readFileSync(`${homeDir}/.codex/auth.json`, "utf-8")).toString("base64");
-          destPath = ".codex/auth.json";
+          uploadCommand = "mkdir -p /efs/.codex && echo '" + authB64 + "' | base64 -d > /efs/.codex/auth.json && chmod 600 /efs/.codex/auth.json && echo AUTH_OK";
         } else {
-          // Claude: find main credential file
-          const credFiles = execSync(`find "${homeDir}/.claude" -maxdepth 1 -type f 2>/dev/null`, { encoding: "utf-8", stdio: "pipe" }).trim().split("\n").filter(Boolean);
-          const mainCred = credFiles[0] || `${homeDir}/.claude/credentials.json`;
-          authB64 = Buffer.from(readFileSync(mainCred, "utf-8")).toString("base64");
-          destPath = `.claude/${mainCred.split("/").pop()}`;
-        }
+          const portableAuth = resolvePortableClaudeAuth(homeDir);
+          if (!portableAuth) {
+            throw new Error("Portable Claude auth could not be validated. Run `claude setup-token` locally and retry.");
+          }
 
-        const destDir = destPath.split("/").slice(0, -1).join("/");
+          authB64 = buildClaudeAuthArchive(homeDir, portableAuth.files);
+          uploadCommand = "mkdir -p /efs && echo '" + authB64 + "' | base64 -d > /tmp/claude-auth.tar.gz && tar -xzf /tmp/claude-auth.tar.gz -C /efs && chmod 600 /efs/.claude.json && echo AUTH_OK";
+        }
         const efsTaskDef = JSON.stringify({
           family: "citio-auth-setup",
           networkMode: "awsvpc",
@@ -764,7 +812,7 @@ async function deployToAws(config: InitConfig): Promise<void> {
           taskRoleArn: `arn:aws:iam::${accountId}:role/citio-task-execution`,
           volumes: [{ name: "citio-home", efsVolumeConfiguration: { fileSystemId: efsId || "<EFS_ID>", rootDirectory: "/", transitEncryption: "ENABLED" } }],
           containerDefinitions: [{ name: "auth-setup", image: "alpine:latest", essential: true,
-            command: ["sh", "-c", `mkdir -p /efs/${destDir} && echo '${authB64}' | base64 -d > /efs/${destPath} && chmod 600 /efs/${destPath} && echo AUTH_OK`],
+            command: ["sh", "-c", uploadCommand],
             mountPoints: [{ sourceVolume: "citio-home", containerPath: "/efs", readOnly: false }],
             logConfiguration: { logDriver: "awslogs", options: { "awslogs-group": "/ecs/citio", "awslogs-region": region, "awslogs-stream-prefix": "auth-setup", "awslogs-create-group": "true" } }
           }]
@@ -912,7 +960,7 @@ async function main(): Promise<void> {
   } else {
     const authMount = config.authMethod === "oauth"
       ? config.provider === "claude"
-        ? " -v ~/.claude:/home/citio/.claude:ro"
+        ? " -v ~/.claude.json:/home/citio/.claude.json:ro -v ~/.claude:/home/citio/.claude:ro"
         : " -v ~/.codex/auth.json:/home/citio/.codex/auth.json:ro"
       : "";
     p.log.info(
