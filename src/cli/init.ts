@@ -98,8 +98,9 @@ async function ensurePortableClaudeAuth(homeDir: string): Promise<string> {
     process.exit(1);
   }
 
-  const token = (await p.password({
+  const token = (await p.text({
     message: "Paste the CLAUDE_CODE_OAUTH_TOKEN that Claude just showed you:",
+    placeholder: "sk-ant-oat01-...",
   })) as string;
 
   if (p.isCancel(token)) process.exit(0);

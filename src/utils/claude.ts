@@ -6,7 +6,9 @@ import path from "path";
 const CLAUDE_AUTH_PROMPT = "Reply with exactly OK";
 
 export function normalizeClaudeOauthToken(token: string): string {
-  return token.replace(/\s+/g, "");
+  const compact = token.replace(/\s+/g, "");
+  const match = compact.match(/sk-ant-oat01-[A-Za-z0-9_-]+/);
+  return match ? match[0] : compact;
 }
 
 export function validateClaudeOauthToken(token: string): boolean {
