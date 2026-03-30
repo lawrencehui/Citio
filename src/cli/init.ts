@@ -4,12 +4,13 @@ import { execSync } from "child_process";
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from "fs";
 import path from "path";
 import { stringify } from "yaml";
-import { buildClaudeAuthArchive, hasClaudeLoginState, resolvePortableClaudeAuth } from "../utils/claude.js";
+import { buildClaudeAuthArchive, hasClaudeLoginState, resolvePortableClaudeAuth, validateClaudeOauthToken } from "../utils/claude.js";
 
 interface InitConfig {
   provider: "codex" | "claude";
   authMethod: "oauth" | "api_key";
   providerApiKey: string;
+  claudeOauthToken: string;
   slackBotToken: string;
   slackAppToken: string;
   slackChannelId: string;
@@ -74,7 +75,16 @@ function checkPrerequisites(): void {
   }
 }
 
-function ensurePortableClaudeAuth(homeDir: string): void {
+async function ensurePortableClaudeAuth(homeDir: string): Promise<string> {
+  if (process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+    if (validateClaudeOauthToken(process.env.CLAUDE_CODE_OAUTH_TOKEN)) {
+      p.log.success("Verified Claude OAuth token from CLAUDE_CODE_OAUTH_TOKEN.");
+      return process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    }
+
+    p.log.warn("CLAUDE_CODE_OAUTH_TOKEN is set but did not validate. Falling back to local Claude auth checks.");
+  }
+
   if (!hasClaudeLoginState(homeDir)) {
     p.log.info("No Claude Code login detected. Running `claude auth login` now...");
     try {
@@ -90,7 +100,7 @@ function ensurePortableClaudeAuth(homeDir: string): void {
     p.log.success(
       `Verified portable Claude auth via ${portableAuth.files.join(", ")}. These files will be uploaded to EFS.`
     );
-    return;
+    return "";
   }
 
   p.log.info(
@@ -104,18 +114,21 @@ function ensurePortableClaudeAuth(homeDir: string): void {
     process.exit(1);
   }
 
-  portableAuth = resolvePortableClaudeAuth(homeDir);
-  if (!portableAuth) {
+  const token = (await p.password({
+    message: "Paste the CLAUDE_CODE_OAUTH_TOKEN that Claude just showed you:",
+  })) as string;
+
+  if (p.isCancel(token)) process.exit(0);
+
+  if (!validateClaudeOauthToken(token)) {
     p.log.error(
-      "Claude auth is still not portable after `claude setup-token`. The installer cannot safely deploy Claude OAuth to ECS from this machine yet."
+      "That Claude OAuth token did not validate from a clean environment. Re-run `claude setup-token` and paste the full token exactly."
     );
-    p.log.info("Use API key auth for now, or re-run the installer after verifying `claude -p` works from a clean HOME.");
     process.exit(1);
   }
 
-  p.log.success(
-    `Verified portable Claude auth via ${portableAuth.files.join(", ")}. These files will be uploaded to EFS.`
-  );
+  p.log.success("Verified portable Claude OAuth token. It will be deployed as CLAUDE_CODE_OAUTH_TOKEN.");
+  return token;
 }
 
 async function collectConfig(): Promise<InitConfig> {
@@ -159,6 +172,7 @@ async function collectConfig(): Promise<InitConfig> {
   if (p.isCancel(authMethod)) process.exit(0);
 
   let providerApiKey = "";
+  let claudeOauthToken = "";
   if (authMethod === "oauth") {
     // Check if already authenticated locally
     const homeDir = process.env.HOME || "";
@@ -167,7 +181,7 @@ async function collectConfig(): Promise<InitConfig> {
       : `${homeDir}/.claude.json`;
 
     if (provider === "claude") {
-      ensurePortableClaudeAuth(homeDir);
+      claudeOauthToken = await ensurePortableClaudeAuth(homeDir);
     } else if (existsSync(authPath)) {
       p.log.success(
         `Found existing ${provider === "codex" ? "Codex" : "Claude Code"} credentials at ${authPath}. ` +
@@ -185,7 +199,7 @@ async function collectConfig(): Promise<InitConfig> {
           execSync("codex login --device-auth", { stdio: "inherit", timeout: 300000 });
         } else {
           execSync("claude auth login", { stdio: "inherit", timeout: 300000 });
-          ensurePortableClaudeAuth(homeDir);
+          claudeOauthToken = await ensurePortableClaudeAuth(homeDir);
         }
         p.log.success("Authenticated! Credentials will be uploaded to EFS during deploy.");
       } catch {
@@ -352,6 +366,7 @@ async function collectConfig(): Promise<InitConfig> {
     provider,
     authMethod,
     providerApiKey,
+    claudeOauthToken,
     slackBotToken,
     slackAppToken,
     slackChannelId,
@@ -425,6 +440,8 @@ function writeConfigFile(config: InitConfig): void {
         ? `OPENAI_API_KEY=${config.providerApiKey}`
         : `ANTHROPIC_API_KEY=${config.providerApiKey}`
     );
+  } else if (config.provider === "claude" && config.claudeOauthToken) {
+    envLines.push(`CLAUDE_CODE_OAUTH_TOKEN=${config.claudeOauthToken}`);
   }
 
   writeFileSync(".env", envLines.join("\n") + "\n", "utf-8");
@@ -634,6 +651,8 @@ async function deployToAws(config: InitConfig): Promise<void> {
     } else {
       envVars.push({ name: "ANTHROPIC_API_KEY", value: config.providerApiKey });
     }
+  } else if (config.provider === "claude" && config.claudeOauthToken) {
+    envVars.push({ name: "CLAUDE_CODE_OAUTH_TOKEN", value: config.claudeOauthToken });
   } else if (config.authMethod === "oauth") {
     // OAuth: credentials uploaded to EFS after deploy (see post-deploy section below)
     // No CITIO_NEEDS_AUTH — container doesn't do interactive auth
@@ -775,7 +794,7 @@ async function deployToAws(config: InitConfig): Promise<void> {
     const homeDir = process.env.HOME || "";
     const hasLocalAuth = config.provider === "codex"
       ? existsSync(`${homeDir}/.codex/auth.json`)
-      : hasClaudeLoginState(homeDir);
+      : !config.claudeOauthToken && hasClaudeLoginState(homeDir);
 
     if (hasLocalAuth) {
       s.start("Uploading credentials to EFS...");
@@ -960,7 +979,9 @@ async function main(): Promise<void> {
   } else {
     const authMount = config.authMethod === "oauth"
       ? config.provider === "claude"
-        ? " -v ~/.claude.json:/home/citio/.claude.json:ro -v ~/.claude:/home/citio/.claude:ro"
+        ? config.claudeOauthToken
+          ? " -e CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN"
+          : " -v ~/.claude.json:/home/citio/.claude.json:ro -v ~/.claude:/home/citio/.claude:ro"
         : " -v ~/.codex/auth.json:/home/citio/.codex/auth.json:ro"
       : "";
     p.log.info(
