@@ -491,7 +491,7 @@ export class AgentRunner {
       NODE_ENV: process.env.NODE_ENV || "production",
       TERM: process.env.TERM || "xterm-256color",
       TMPDIR: process.env.TMPDIR,
-      ...pickDefinedEnv(["ANTHROPIC_API_KEY"]),
+      ...pickDefinedEnv(["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"]),
       ...getTaskRoleEnv(),
     };
   }

@@ -93,7 +93,9 @@ async function main(): Promise<void> {
   if (config.engine.default_provider === "claude" && !process.env.ANTHROPIC_API_KEY) {
     console.log(JSON.stringify({
       type: "claude_auth_mode",
-      message: "Claude will run without --bare so it can use persisted ~/.claude credentials.",
+      message: process.env.CLAUDE_CODE_OAUTH_TOKEN
+        ? "Claude will run without --bare using CLAUDE_CODE_OAUTH_TOKEN."
+        : "Claude will run without --bare so it can use non-API-key Claude auth.",
     }));
   }
 
