@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "tsx src/index.ts",
-    "build": "tsc",
+    "build": "tsc && chmod +x dist/cli/init.js",
     "init": "tsx src/cli/init.ts",
     "start": "node dist/index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
