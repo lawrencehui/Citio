@@ -1,6 +1,7 @@
 import { execFileSync } from "child_process";
 import { existsSync } from "fs";
 import path from "path";
+import { getTaskRoleEnv, pickDefinedEnv } from "../utils/runtime-env.js";
 
 function getMcpCommand(): { command: string; args: string[] } {
   const distEntry = path.resolve(process.cwd(), "dist/core/mcp-entry.js");
@@ -21,14 +22,14 @@ function getMcpCommand(): { command: string; args: string[] } {
 
 export function ensureCodexMcpConfigured(workspacePath: string): void {
   const { command, args } = getMcpCommand();
-  const envVars = [
-    `CITIO_CONFIG=${process.env.CITIO_CONFIG || "citio.yaml"}`,
-    `CITIO_CONFIG_B64=${process.env.CITIO_CONFIG_B64 || ""}`,
-    `CITIO_WORKSPACE=${workspacePath}`,
-    `CITIO_MEMORY=${process.env.CITIO_MEMORY || "/memory"}`,
-    `GH_TOKEN=${process.env.GH_TOKEN || ""}`,
-    `AWS_DEFAULT_REGION=${process.env.AWS_DEFAULT_REGION || ""}`,
-  ];
+  const envVars = {
+    CITIO_CONFIG: process.env.CITIO_CONFIG || "citio.yaml",
+    CITIO_CONFIG_B64: process.env.CITIO_CONFIG_B64 || "",
+    CITIO_WORKSPACE: workspacePath,
+    CITIO_MEMORY: process.env.CITIO_MEMORY || "/memory",
+    ...pickDefinedEnv(["GH_TOKEN"]),
+    ...getTaskRoleEnv(),
+  };
 
   try {
     execFileSync("codex", ["mcp", "remove", "citio"], {
@@ -46,7 +47,7 @@ export function ensureCodexMcpConfigured(workspacePath: string): void {
       "mcp",
       "add",
       "citio",
-      ...envVars.flatMap((entry) => ["--env", entry]),
+      ...Object.entries(envVars).flatMap(([key, value]) => ["--env", `${key}=${value}`]),
       "--",
       command,
       ...args,

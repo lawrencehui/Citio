@@ -4,6 +4,7 @@ import path from "path";
 import type { CitioConfig } from "../config/schema.js";
 import { ensureCodexMcpConfigured } from "./provider-config.js";
 import { formatCodexAuthHint, isLikelyCodexAuthError } from "../utils/codex.js";
+import { getTaskRoleEnv, pickDefinedEnv } from "../utils/runtime-env.js";
 
 interface QueuedTask {
   prompt: string;
@@ -51,6 +52,7 @@ export class AgentRunner {
             PATH: process.env.PATH || "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
             GH_TOKEN: process.env.GH_TOKEN || "",
             AWS_DEFAULT_REGION: process.env.AWS_DEFAULT_REGION || "",
+            ...getTaskRoleEnv(),
           },
         },
       },
@@ -373,7 +375,6 @@ export class AgentRunner {
       const delta = event.delta as { type?: string; text?: string };
       if (delta?.type === "text_delta" && delta.text) {
         appendResult(delta.text);
-        if (task.onProgress) task.onProgress(delta.text);
       }
     } else if (type === "stream_event") {
       // Nested stream event
@@ -408,7 +409,6 @@ export class AgentRunner {
 
       if (item?.type === "agent_message" && item.text) {
         appendResult(item.text);
-        if (task.onProgress) task.onProgress(item.text);
       } else if (item?.type === "mcp_tool_call" && item.server && item.tool && task.onProgress) {
         const resultText = this.extractCodexToolResultText(event);
         task.onProgress(item.error
@@ -448,7 +448,8 @@ export class AgentRunner {
       NODE_ENV: process.env.NODE_ENV || "production",
       TERM: process.env.TERM || "xterm-256color",
       TMPDIR: process.env.TMPDIR,
-      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+      ...pickDefinedEnv(["ANTHROPIC_API_KEY"]),
+      ...getTaskRoleEnv(),
     };
   }
 
@@ -459,8 +460,8 @@ export class AgentRunner {
       NODE_ENV: process.env.NODE_ENV || "production",
       TERM: process.env.TERM || "xterm-256color",
       TMPDIR: process.env.TMPDIR,
-      OPENAI_API_KEY: process.env.OPENAI_API_KEY,
-      CODEX_MODEL: process.env.CODEX_MODEL,
+      ...pickDefinedEnv(["OPENAI_API_KEY", "CODEX_MODEL"]),
+      ...getTaskRoleEnv(),
     };
   }
 

@@ -24,6 +24,61 @@ function redactCredentials(text: string): string {
   return redacted;
 }
 
+const MCP_PROGRESS_MESSAGES: Record<string, string> = {
+  "mcp__citio__investigate_codebase": "Scanning the codebase...",
+  "mcp__citio__read_file": "Reading repository files...",
+  "mcp__citio__write_file": "Preparing a code change...",
+  "mcp__citio__query_logs": "Querying CloudWatch logs...",
+  "mcp__citio__query_audit_log": "Checking the Citio audit trail...",
+  "mcp__citio__recall_context": "Recalling prior context...",
+  "mcp__citio__run_command": "Running a controlled workspace command...",
+  "mcp__citio__check_ci_status": "Checking CI status...",
+  "mcp__citio__create_branch": "Preparing a branch...",
+  "mcp__citio__create_pr": "Preparing a pull request...",
+  "citio.investigate_codebase": "Scanning the codebase...",
+  "citio.read_file": "Reading repository files...",
+  "citio.write_file": "Preparing a code change...",
+  "citio.query_logs": "Querying CloudWatch logs...",
+  "citio.query_audit_log": "Checking the Citio audit trail...",
+  "citio.recall_context": "Recalling prior context...",
+  "citio.run_command": "Running a controlled workspace command...",
+  "citio.check_ci_status": "Checking CI status...",
+  "citio.create_branch": "Preparing a branch...",
+  "citio.create_pr": "Preparing a pull request...",
+};
+
+const NATIVE_TOOL_NAMES = new Set(["Agent", "Bash", "Grep", "Glob", "Read", "ToolSearch"]);
+
+function normalizeProgressChunk(chunk: string): string | null {
+  const trimmed = chunk.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (trimmed.startsWith("[Progress] ")) {
+    return trimmed;
+  }
+
+  if (trimmed.startsWith("Using tool: ")) {
+    const toolName = trimmed.slice("Using tool: ".length).trim();
+    if (toolName === "mcp__citio__post_update" || NATIVE_TOOL_NAMES.has(toolName)) {
+      return null;
+    }
+    return MCP_PROGRESS_MESSAGES[toolName] || null;
+  }
+
+  if (trimmed.startsWith("Using MCP tool ")) {
+    const toolName = trimmed.slice("Using MCP tool ".length).trim();
+    return MCP_PROGRESS_MESSAGES[toolName] || null;
+  }
+
+  if (trimmed.startsWith("MCP tool ")) {
+    return null;
+  }
+
+  return null;
+}
+
 export class SlackAdapter {
   private app: App;
   private config: CitioConfig;
@@ -181,8 +236,14 @@ export class SlackAdapter {
           // Submit to the agent
           let dmLastUpdate = Date.now();
           let dmAccOutput = "";
+          let dmLastProgressLine = "";
           const stopProgressPolling = this.startProgressPolling(threadKey, (update) => {
-            dmAccOutput += `\n${update}`;
+            const normalized = normalizeProgressChunk(update);
+            if (!normalized || normalized === dmLastProgressLine) {
+              return;
+            }
+            dmLastProgressLine = normalized;
+            dmAccOutput += `${dmAccOutput ? "\n" : ""}${normalized}`;
           });
 
           await this.agentRunner.submit({
@@ -193,7 +254,12 @@ export class SlackAdapter {
               this.sessionManager.remember(threadKey, providerSessionId);
             },
             onProgress: (chunk) => {
-              dmAccOutput += chunk;
+              const normalized = normalizeProgressChunk(chunk);
+              if (!normalized || normalized === dmLastProgressLine) {
+                return;
+              }
+              dmLastProgressLine = normalized;
+              dmAccOutput += `${dmAccOutput ? "\n" : ""}${normalized}`;
               const now = Date.now();
               if (thinkingTs && now - dmLastUpdate >= 5000) {
                 dmLastUpdate = now;
@@ -289,8 +355,14 @@ export class SlackAdapter {
 
       let lastUpdateTime = Date.now();
       let accumulatedOutput = "";
+      let lastProgressLine = "";
       const stopProgressPolling = this.startProgressPolling(threadKey, (update) => {
-        accumulatedOutput += `\n${update}`;
+        const normalized = normalizeProgressChunk(update);
+        if (!normalized || normalized === lastProgressLine) {
+          return;
+        }
+        lastProgressLine = normalized;
+        accumulatedOutput += `${accumulatedOutput ? "\n" : ""}${normalized}`;
       });
 
       await this.agentRunner.submit({
@@ -301,7 +373,12 @@ export class SlackAdapter {
           this.sessionManager.remember(threadKey, providerSessionId);
         },
         onProgress: (chunk) => {
-          accumulatedOutput += chunk;
+          const normalized = normalizeProgressChunk(chunk);
+          if (!normalized || normalized === lastProgressLine) {
+            return;
+          }
+          lastProgressLine = normalized;
+          accumulatedOutput += `${accumulatedOutput ? "\n" : ""}${normalized}`;
           const now = Date.now();
           // Update thinking message every 5 seconds with latest output
           if (thinkingTs && now - lastUpdateTime >= 5000) {
@@ -357,9 +434,11 @@ export class SlackAdapter {
   private buildPrompt(userMessage: string, contextInfo: string, threadKey: string): string {
     const parts = [
       "You are Citio, an autonomous CTO agent. A team member is asking for help.",
-      "You should prefer the Citio MCP tools for repository investigation, file edits, pull requests, CI checks, and command execution.",
+      "You should prefer the Citio MCP tools for repository investigation, file edits, pull requests, CI checks, log queries, and controlled command execution.",
+      "Use the Citio MCP tools instead of native Bash/Grep/Glob/Read tools whenever a Citio tool can do the job.",
+      "For AWS and CloudWatch work, prefer query_logs first and only fall back to Citio run_command when query_logs cannot answer the question.",
       "If you use shell access, keep it to the minimum needed and do not assume direct credential access.",
-      "For AWS commands: never use --profile. The IAM task role provides credentials automatically when those commands are available.",
+      "For AWS commands: never use --profile. The ECS task role provides credentials automatically when those commands are available.",
       `If you want to send a structured progress update, call post_update with thread_key=\"${threadKey}\".`,
     ];
 

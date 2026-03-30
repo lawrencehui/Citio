@@ -135,11 +135,13 @@ You have access to these tools via the MCP server:
 
 ## Workflow
 1. When asked to investigate a bug, use investigate_codebase and read_file first
-2. Use post_update for meaningful progress checkpoints, not every trivial step
-3. Use recall_context before repeating prior investigations
-4. Create a branch before making changes
-5. Create a PR when your fix is ready
-6. Save any important findings with save_finding
+2. For CloudWatch or AWS checks, use query_logs first and only use run_command when query_logs is not enough
+3. Prefer these MCP tools over native Bash/Grep/Glob/Read tools whenever possible
+4. Use post_update for meaningful progress checkpoints, not every trivial step
+5. Use recall_context before repeating prior investigations
+6. Create a branch before making changes
+7. Create a PR when your fix is ready
+8. Save any important findings with save_finding
 
 ${skills}
 `;
