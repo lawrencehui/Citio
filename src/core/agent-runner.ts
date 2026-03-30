@@ -1,31 +1,63 @@
-import { spawn, type ChildProcess } from "child_process";
+import { spawn } from "child_process";
 import { writeFileSync, mkdirSync, existsSync } from "fs";
 import path from "path";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { CitioConfig } from "../config/schema.js";
+import { ensureCodexMcpConfigured } from "./provider-config.js";
+import { formatCodexAuthHint, isLikelyCodexAuthError } from "../utils/codex.js";
 
 interface QueuedTask {
   prompt: string;
-  threadId: string | null; // null = new conversation, string = continue
-  onProgress?: (chunk: string) => void;
-  onComplete: (output: string, threadId: string) => void;
+  threadKey: string;
+  sessionId?: string | null;
+  onProgress?: (text: string) => void;
+  onSessionEstablished?: (sessionId: string) => void;
+  onComplete: (output: string) => void;
   onError: (error: Error) => void;
 }
 
 export class AgentRunner {
   private config: CitioConfig;
   private queue: QueuedTask[] = [];
-  private running = false;
+  private activeCount = 0;
+  private activeThreadKeys = new Set<string>();
   private workspacePath: string;
-  private mcpClient: Client | null = null;
-  private mcpProcess: ChildProcess | null = null;
-  private mcpConfigPath: string = "";
-  private threadMap = new Map<string, string>(); // slack_thread_ts → codex_thread_id
+  private mcpConfigPath: string;
 
   constructor(config: CitioConfig, workspacePath: string) {
     this.config = config;
     this.workspacePath = workspacePath;
+    this.mcpConfigPath = "/tmp/citio/mcp-config.json";
+    this.writeMcpConfig();
+  }
+
+  private writeMcpConfig(): void {
+    mkdirSync("/tmp/citio", { recursive: true });
+
+    const distEntry = path.resolve(process.cwd(), "dist/core/mcp-entry.js");
+    const srcEntry = path.resolve(process.cwd(), "src/core/mcp-entry.ts");
+    const useTsEntry = !existsSync(distEntry);
+
+    const mcpConfig = {
+      mcpServers: {
+        citio: {
+          command: useTsEntry ? "npx" : "node",
+          args: useTsEntry ? ["tsx", srcEntry] : [distEntry],
+          env: {
+            CITIO_CONFIG: process.env.CITIO_CONFIG || "citio.yaml",
+            CITIO_CONFIG_B64: process.env.CITIO_CONFIG_B64 || "",
+            CITIO_WORKSPACE: this.workspacePath,
+            CITIO_MEMORY: process.env.CITIO_MEMORY || "/memory",
+            HOME: process.env.HOME || "/home/citio",
+            PATH: process.env.PATH || "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            GH_TOKEN: process.env.GH_TOKEN || "",
+            AWS_DEFAULT_REGION: process.env.AWS_DEFAULT_REGION || "",
+          },
+        },
+      },
+    };
+
+    writeFileSync(this.mcpConfigPath, JSON.stringify(mcpConfig));
+    console.log(JSON.stringify({ type: "mcp_config_written", path: this.mcpConfigPath }));
   }
 
   get queueLength(): number {
@@ -33,84 +65,20 @@ export class AgentRunner {
   }
 
   get isRunning(): boolean {
-    return this.running;
+    return this.activeCount > 0;
   }
 
-  getThreadId(slackThreadTs: string): string | null {
-    return this.threadMap.get(slackThreadTs) || null;
+  get isSaturated(): boolean {
+    return this.activeCount >= this.config.engine.max_concurrent_sessions;
   }
 
   async start(): Promise<void> {
-    const provider = this.config.engine.default_provider;
-
-    if (provider === "codex") {
-      await this.startCodexMcpServer();
-    } else {
-      await this.startClaudeMcpServer();
+    if (this.config.engine.default_provider === "codex") {
+      ensureCodexMcpConfigured(this.workspacePath);
+      console.log(JSON.stringify({ type: "codex_mcp_configured" }));
     }
-  }
 
-  private async startCodexMcpServer(): Promise<void> {
-    const transport = new StdioClientTransport({
-      command: "codex",
-      args: [
-        "mcp-server",
-        "-c", `sandbox="danger-full-access"`,
-      ],
-      env: {
-        ...process.env,
-        HOME: process.env.HOME || "/home/citio",
-      },
-      cwd: this.workspacePath,
-    });
-
-    this.mcpClient = new Client({
-      name: "citio",
-      version: "0.1.0",
-    });
-
-    await this.mcpClient.connect(transport);
-    console.log(JSON.stringify({ type: "codex_mcp_server_started" }));
-  }
-
-  private async startClaudeMcpServer(): Promise<void> {
-    // Claude Code uses --mcp-config to connect to our MCP tools server
-    // Generate MCP config that points to our mcp-entry.ts
-    this.generateMcpConfig();
-    console.log(JSON.stringify({ type: "claude_mcp_configured", config: this.mcpConfigPath }));
-  }
-
-  private generateMcpConfig(): void {
-    const distEntry = path.resolve(process.cwd(), "dist/core/mcp-entry.js");
-    const srcEntry = path.resolve(process.cwd(), "src/core/mcp-entry.ts");
-    const useTs = !existsSync(distEntry);
-    const mcpCommand = useTs ? "npx" : "node";
-    const mcpArgs = useTs ? ["tsx", srcEntry] : [distEntry];
-
-    const configDir = "/tmp/citio";
-    mkdirSync(configDir, { recursive: true });
-    this.mcpConfigPath = `${configDir}/mcp-config.json`;
-
-    const mcpConfig = {
-      mcpServers: {
-        citio: {
-          command: mcpCommand,
-          args: mcpArgs,
-          env: {
-            CITIO_CONFIG: process.env.CITIO_CONFIG || "citio.yaml",
-            CITIO_WORKSPACE: this.workspacePath,
-            CITIO_MEMORY: process.env.CITIO_MEMORY || "/memory",
-            GH_TOKEN: process.env.GH_TOKEN || "",
-            AWS_PROFILE: process.env.AWS_PROFILE || "",
-            AWS_DEFAULT_REGION: process.env.AWS_DEFAULT_REGION || "",
-            HOME: process.env.HOME || "",
-            PATH: process.env.PATH || "",
-          },
-        },
-      },
-    };
-
-    writeFileSync(this.mcpConfigPath, JSON.stringify(mcpConfig, null, 2), "utf-8");
+    console.log(JSON.stringify({ type: "agent_runner_ready", provider: this.config.engine.default_provider }));
   }
 
   async submit(task: QueuedTask): Promise<void> {
@@ -119,193 +87,404 @@ export class AgentRunner {
   }
 
   private async processQueue(): Promise<void> {
-    if (this.running || this.queue.length === 0) return;
+    while (this.activeCount < this.config.engine.max_concurrent_sessions) {
+      const index = this.queue.findIndex((candidate) => !this.activeThreadKeys.has(candidate.threadKey));
+      if (index === -1) {
+        return;
+      }
 
-    this.running = true;
-    const task = this.queue.shift()!;
+      const [task] = this.queue.splice(index, 1);
+      if (!task) {
+        return;
+      }
 
-    try {
-      await this.runTask(task);
-    } catch (err) {
-      task.onError(err instanceof Error ? err : new Error(String(err)));
-    } finally {
-      this.running = false;
-      this.processQueue();
+      this.activeCount += 1;
+      this.activeThreadKeys.add(task.threadKey);
+
+      void this.runTask(task)
+        .catch((err) => {
+          task.onError(err instanceof Error ? err : new Error(String(err)));
+        })
+        .finally(() => {
+          this.activeCount -= 1;
+          this.activeThreadKeys.delete(task.threadKey);
+          void this.processQueue();
+        });
     }
   }
 
   private async runTask(task: QueuedTask): Promise<void> {
-    const provider = this.config.engine.default_provider;
-
-    if (provider === "codex" && this.mcpClient) {
-      await this.runCodexTask(task);
-    } else {
-      await this.runClaudeTask(task);
+    if (this.config.engine.default_provider === "codex") {
+      return this.runCodexTask(task);
     }
-  }
 
-  private async runCodexTask(task: QueuedTask): Promise<void> {
-    if (!this.mcpClient) throw new Error("Codex MCP server not started");
-
-    console.log(JSON.stringify({
-      type: "agent_task",
-      provider: "codex",
-      threadId: task.threadId,
-      queue_remaining: this.queue.length,
-      prompt_preview: task.prompt.slice(0, 100),
-    }));
-
-    try {
-      let result;
-      if (task.threadId) {
-        // Continue existing conversation
-        result = await this.mcpClient.callTool({
-          name: "codex-reply",
-          arguments: {
-            threadId: task.threadId,
-            prompt: task.prompt,
-          },
-        });
-      } else {
-        // New conversation
-        result = await this.mcpClient.callTool({
-          name: "codex",
-          arguments: {
-            prompt: task.prompt,
-            cwd: this.workspacePath,
-            sandbox: "danger-full-access",
-          },
-        });
-      }
-
-      // Extract content and threadId from result
-      const content = result.content as Array<{ type: string; text?: string }>;
-      const textContent = content
-        .filter((c) => c.type === "text" && c.text)
-        .map((c) => c.text!)
-        .join("\n");
-
-      // Parse threadId from the structured output
-      let threadId = task.threadId || "";
-      try {
-        const parsed = JSON.parse(textContent);
-        if (parsed.threadId) threadId = parsed.threadId;
-        task.onComplete(parsed.content || textContent, threadId);
-      } catch {
-        // Plain text response
-        task.onComplete(textContent, threadId);
-      }
-
-      console.log(JSON.stringify({
-        type: "agent_complete",
-        threadId,
-        output_length: textContent.length,
-      }));
-    } catch (err) {
-      console.log(JSON.stringify({
-        type: "agent_error",
-        error: err instanceof Error ? err.message : String(err),
-      }));
-      throw err;
-    }
+    return this.runClaudeTask(task);
   }
 
   private async runClaudeTask(task: QueuedTask): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
+    return new Promise<void>((resolve) => {
       const model = process.env.CLAUDE_MODEL || "claude-opus-4-6";
+      const useBare = Boolean(process.env.ANTHROPIC_API_KEY);
+
       const args = [
-        "--bare",
         "-p", task.prompt,
         "--output-format", "stream-json",
         "--dangerously-skip-permissions",
         "--model", model,
         "--verbose",
+        "--mcp-config", this.mcpConfigPath,
       ];
+
+      if (useBare) {
+        args.unshift("--bare");
+      }
+
+      if (task.sessionId) {
+        args.push("--session-id", task.sessionId);
+        task.onSessionEstablished?.(task.sessionId);
+      }
+
+      console.log(JSON.stringify({
+        type: "agent_spawn",
+        provider: "claude",
+        model,
+        bare: useBare,
+        prompt_preview: task.prompt.slice(0, 100),
+        queue_remaining: this.queue.length,
+      }));
 
       const child = spawn("claude", args, {
         cwd: this.workspacePath,
         stdio: ["pipe", "pipe", "pipe"],
-        env: { ...process.env },
+        env: this.buildClaudeEnv(),
       });
 
-      let output = "";
       let finalResult = "";
-      let progressText = "";
       let lineBuffer = "";
 
       child.stdout?.on("data", (data: Buffer) => {
         lineBuffer += data.toString();
         const lines = lineBuffer.split("\n");
-        lineBuffer = lines.pop() || ""; // keep incomplete last line
+        lineBuffer = lines.pop() || "";
 
         for (const line of lines) {
           if (!line.trim()) continue;
           try {
             const event = JSON.parse(line);
-
-            // Extract text from different event types
-            if (event.type === "assistant" && event.message?.content) {
-              for (const block of event.message.content) {
-                if (block.type === "text") {
-                  finalResult += block.text;
-                }
-              }
-            } else if (event.type === "content_block_delta" && event.delta?.text) {
-              finalResult += event.delta.text;
-              if (task.onProgress) task.onProgress(event.delta.text);
-            } else if (event.type === "result" && event.result) {
-              // Final result event
-              finalResult = event.result;
-            } else if (event.type === "tool_use" || (event.type === "content_block_start" && event.content_block?.type === "tool_use")) {
-              // Tool usage — show as progress
-              const toolName = event.name || event.content_block?.name || "tool";
-              progressText = `Using ${toolName}...`;
-              if (task.onProgress) task.onProgress(progressText);
-            } else if (event.type === "tool_result") {
-              const result = typeof event.content === "string" ? event.content : JSON.stringify(event.content);
-              progressText = result.slice(0, 200);
-              if (task.onProgress) task.onProgress(progressText);
-            }
+            this.handleStreamEvent(event, task, (text) => { finalResult += text; });
           } catch {
-            // Not JSON, treat as plain text
-            output += line + "\n";
+            // Not JSON — raw text output
+            finalResult += line;
             if (task.onProgress) task.onProgress(line);
           }
         }
       });
 
       child.stderr?.on("data", (data: Buffer) => {
-        console.log(JSON.stringify({
-          type: "agent_stderr",
-          data: data.toString().slice(0, 500),
-        }));
-      });
-
-      child.on("exit", (code) => {
-        const result = finalResult || output;
-        if (code === 0 || result.length > 0) {
-          task.onComplete(result, "");
-          resolve();
-        } else {
-          task.onError(new Error(`Agent exited with code ${code}`));
-          resolve();
+        const text = data.toString();
+        // Only log non-warning stderr
+        if (!text.includes("no stdin data")) {
+          console.log(JSON.stringify({ type: "agent_stderr", data: text.slice(0, 500) }));
         }
       });
 
+      child.on("exit", (code) => {
+        // Process any remaining buffer
+        if (lineBuffer.trim()) {
+          try {
+            const event = JSON.parse(lineBuffer);
+            this.handleStreamEvent(event, task, (text) => { finalResult += text; });
+          } catch {
+            finalResult += lineBuffer;
+          }
+        }
+
+        console.log(JSON.stringify({
+          type: "agent_exit",
+          exit_code: code,
+          output_length: finalResult.length,
+        }));
+
+        if (finalResult.length > 0 || code === 0) {
+          task.onComplete(finalResult);
+        } else {
+          task.onError(new Error(`Agent exited with code ${code}`));
+        }
+        resolve();
+      });
+
       child.on("error", (err) => {
+        console.log(JSON.stringify({ type: "agent_error", error: err.message }));
         task.onError(err);
         resolve();
       });
 
-      // Timeout
+      // Wall-clock timeout
       const timeoutMs = this.config.engine.max_session_duration_minutes * 60 * 1000;
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         if (child.exitCode === null) {
+          console.log(JSON.stringify({ type: "agent_timeout", timeout_ms: timeoutMs }));
           child.kill("SIGTERM");
-          setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 10000);
+          setTimeout(() => {
+            if (child.exitCode === null) try { child.kill("SIGKILL"); } catch {}
+          }, 10000);
         }
       }, timeoutMs);
+
+      child.on("exit", () => clearTimeout(timer));
     });
+  }
+
+  private async runCodexTask(task: QueuedTask): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const model = process.env.CODEX_MODEL;
+      const args = task.sessionId
+        ? [
+            "exec",
+            "resume",
+            "--json",
+            "--dangerously-bypass-approvals-and-sandbox",
+            task.sessionId,
+          ]
+        : [
+            "exec",
+            "--json",
+            "--skip-git-repo-check",
+            "--dangerously-bypass-approvals-and-sandbox",
+            "-C", this.workspacePath,
+          ];
+
+      if (model) {
+        args.push("--model", model);
+      }
+
+      args.push(task.prompt);
+
+      console.log(JSON.stringify({
+        type: "agent_spawn",
+        provider: "codex",
+        model: model || "default",
+        prompt_preview: task.prompt.slice(0, 100),
+        queue_remaining: this.queue.length,
+      }));
+
+      const child = spawn("codex", args, {
+        cwd: this.workspacePath,
+        stdio: ["pipe", "pipe", "pipe"],
+        env: this.buildCodexEnv(),
+      });
+
+      let finalResult = "";
+      let stderrOutput = "";
+      let lineBuffer = "";
+
+      child.stdout?.on("data", (data: Buffer) => {
+        lineBuffer += data.toString();
+        const lines = lineBuffer.split("\n");
+        lineBuffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const event = JSON.parse(line) as Record<string, unknown>;
+            this.handleCodexEvent(event, task, (text) => { finalResult += text; });
+          } catch {
+            finalResult += line;
+            if (task.onProgress) task.onProgress(line);
+          }
+        }
+      });
+
+      child.stderr?.on("data", (data: Buffer) => {
+        const text = data.toString();
+        stderrOutput += text;
+        console.log(JSON.stringify({ type: "agent_stderr", provider: "codex", data: text.slice(0, 500) }));
+      });
+
+      child.on("exit", (code) => {
+        if (lineBuffer.trim()) {
+          try {
+            const event = JSON.parse(lineBuffer) as Record<string, unknown>;
+            this.handleCodexEvent(event, task, (text) => { finalResult += text; });
+          } catch {
+            finalResult += lineBuffer;
+          }
+        }
+
+        console.log(JSON.stringify({
+          type: "agent_exit",
+          provider: "codex",
+          exit_code: code,
+          output_length: finalResult.length,
+        }));
+
+        if (finalResult.length > 0 || code === 0) {
+          task.onComplete(finalResult);
+        } else {
+          task.onError(new Error(this.humanizeCodexError(code, stderrOutput)));
+        }
+        resolve();
+      });
+
+      child.on("error", (err) => {
+        console.log(JSON.stringify({ type: "agent_error", provider: "codex", error: err.message }));
+        task.onError(err);
+        resolve();
+      });
+
+      const timeoutMs = this.config.engine.max_session_duration_minutes * 60 * 1000;
+      const timer = setTimeout(() => {
+        if (child.exitCode === null) {
+          console.log(JSON.stringify({ type: "agent_timeout", provider: "codex", timeout_ms: timeoutMs }));
+          child.kill("SIGTERM");
+          setTimeout(() => {
+            if (child.exitCode === null) try { child.kill("SIGKILL"); } catch {}
+          }, 10000);
+        }
+      }, timeoutMs);
+
+      child.on("exit", () => clearTimeout(timer));
+    });
+  }
+
+  private handleStreamEvent(
+    event: Record<string, unknown>,
+    task: QueuedTask,
+    appendResult: (text: string) => void
+  ): void {
+    const type = event.type as string;
+
+    if (type === "result") {
+      // Final result
+      const result = event.result as string;
+      if (result) appendResult(result);
+    } else if (type === "assistant" && event.message) {
+      // Assistant message with content blocks
+      const msg = event.message as { content?: Array<{ type: string; text?: string; name?: string }> };
+      for (const block of msg.content || []) {
+        if (block.type === "text" && block.text) {
+          appendResult(block.text);
+        } else if (block.type === "tool_use" && block.name) {
+          if (task.onProgress) task.onProgress(`Using tool: ${block.name}`);
+        }
+      }
+    } else if (type === "content_block_delta") {
+      const delta = event.delta as { type?: string; text?: string };
+      if (delta?.type === "text_delta" && delta.text) {
+        appendResult(delta.text);
+        if (task.onProgress) task.onProgress(delta.text);
+      }
+    } else if (type === "stream_event") {
+      // Nested stream event
+      const inner = event.event as Record<string, unknown> | undefined;
+      if (inner) this.handleStreamEvent(inner, task, appendResult);
+    }
+  }
+
+  private handleCodexEvent(
+    event: Record<string, unknown>,
+    task: QueuedTask,
+    appendResult: (text: string) => void
+  ): void {
+    const type = event.type as string | undefined;
+
+    if (type === "item.started") {
+      const item = event.item as { type?: string; server?: string; tool?: string } | undefined;
+      if (item?.type === "mcp_tool_call" && item.server && item.tool && task.onProgress) {
+        task.onProgress(`Using MCP tool ${item.server}.${item.tool}`);
+      }
+      return;
+    }
+
+    if (type === "item.completed") {
+      const item = event.item as {
+        type?: string;
+        text?: string;
+        server?: string;
+        tool?: string;
+        error?: string | null;
+      } | undefined;
+
+      if (item?.type === "agent_message" && item.text) {
+        appendResult(item.text);
+        if (task.onProgress) task.onProgress(item.text);
+      } else if (item?.type === "mcp_tool_call" && item.server && item.tool && task.onProgress) {
+        const resultText = this.extractCodexToolResultText(event);
+        task.onProgress(item.error
+          ? `MCP tool ${item.server}.${item.tool} failed: ${item.error}`
+          : resultText || `MCP tool ${item.server}.${item.tool} completed`);
+      }
+      return;
+    }
+
+    if (type === "thread.started") {
+      const threadId = event.thread_id as string | undefined;
+      if (threadId) {
+        task.onSessionEstablished?.(threadId);
+        console.log(JSON.stringify({ type: "codex_thread_started", thread_id: threadId }));
+      }
+    }
+  }
+
+  private humanizeCodexError(code: number | null, stderrOutput: string): string {
+    const stderr = stderrOutput.trim();
+
+    if (isLikelyCodexAuthError(stderr)) {
+      return `${formatCodexAuthHint()}\n${stderr}`;
+    }
+
+    if (stderr) {
+      return `Codex exited with code ${code}: ${stderr}`;
+    }
+
+    return `Codex exited with code ${code}`;
+  }
+
+  private buildClaudeEnv(): NodeJS.ProcessEnv {
+    return {
+      HOME: process.env.HOME || "/home/citio",
+      PATH: process.env.PATH || "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      NODE_ENV: process.env.NODE_ENV || "production",
+      TERM: process.env.TERM || "xterm-256color",
+      TMPDIR: process.env.TMPDIR,
+      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+    };
+  }
+
+  private buildCodexEnv(): NodeJS.ProcessEnv {
+    return {
+      HOME: process.env.HOME || "/home/citio",
+      PATH: process.env.PATH || "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      NODE_ENV: process.env.NODE_ENV || "production",
+      TERM: process.env.TERM || "xterm-256color",
+      TMPDIR: process.env.TMPDIR,
+      OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+      CODEX_MODEL: process.env.CODEX_MODEL,
+    };
+  }
+
+  private extractCodexToolResultText(event: Record<string, unknown>): string | null {
+    const item = event.item as {
+      result?: { content?: Array<{ type?: string; text?: string }> };
+      tool?: string;
+    } | undefined;
+
+    if (item?.tool !== "post_update") {
+      return null;
+    }
+
+    const blocks = item.result?.content;
+    if (!blocks || blocks.length === 0) {
+      return null;
+    }
+
+    const text = blocks
+      .filter((block) => block.type === "text" && block.text)
+      .map((block) => block.text?.trim() || "")
+      .filter(Boolean)
+      .join("\n");
+
+    return text || null;
   }
 
   async shutdown(): Promise<void> {
@@ -313,12 +492,5 @@ export class AgentRunner {
       task.onError(new Error("Agent shutting down"));
     }
     this.queue = [];
-
-    if (this.mcpClient) {
-      try { await this.mcpClient.close(); } catch {}
-    }
-    if (this.mcpProcess) {
-      try { this.mcpProcess.kill("SIGTERM"); } catch {}
-    }
   }
 }

@@ -4,8 +4,10 @@ import { parse } from "yaml";
 import { CitioConfigSchema } from "./config/schema.js";
 import { WorkspaceManager } from "./core/workspace.js";
 import { AgentRunner } from "./core/agent-runner.js";
+import { SessionManager } from "./core/session-manager.js";
 import { SlackAdapter } from "./adapters/slack.js";
 import { resolveEnvVars } from "./utils/env.js";
+import { formatCodexAuthHint, getCodexAuthPath, hasCodexCredentials } from "./utils/codex.js";
 import { createServer } from "http";
 
 async function main(): Promise<void> {
@@ -46,8 +48,22 @@ async function main(): Promise<void> {
   if (config.engine.default_provider === "codex") {
     const fs = await import("fs");
     const home = process.env.HOME || "/home/citio";
-    console.log(JSON.stringify({ type: "debug_home", HOME: home }));
-    const authPath = `${home}/.codex/auth.json`;
+    const authPath = getCodexAuthPath(home);
+    console.log(JSON.stringify({
+      type: "codex_auth_check",
+      home,
+      authPath,
+      hasAuthFile: fs.existsSync(authPath),
+      hasApiKey: Boolean(process.env.OPENAI_API_KEY),
+    }));
+
+    if (!hasCodexCredentials()) {
+      console.log(JSON.stringify({
+        type: "codex_auth_missing",
+        message: formatCodexAuthHint(home),
+      }));
+    }
+
     try {
       const authData = JSON.parse(fs.readFileSync(authPath, "utf-8"));
       const refreshToken = authData?.tokens?.refresh_token;
@@ -74,6 +90,13 @@ async function main(): Promise<void> {
     }
   }
 
+  if (config.engine.default_provider === "claude" && !process.env.ANTHROPIC_API_KEY) {
+    console.log(JSON.stringify({
+      type: "claude_auth_mode",
+      message: "Claude will run without --bare so it can use persisted ~/.claude credentials.",
+    }));
+  }
+
   // Initialize workspace
   const workspace = new WorkspaceManager(config, workspacePath);
   await workspace.initialize();
@@ -81,6 +104,10 @@ async function main(): Promise<void> {
   // Initialize agent runner (long-running MCP server for Codex, or -p for Claude)
   const agentRunner = new AgentRunner(config, workspacePath);
   await agentRunner.start();
+  const sessionManager = new SessionManager(
+    config.engine.default_provider,
+    process.env.CITIO_MEMORY || "/memory"
+  );
 
   // Health check server
   const healthServer = createServer((req, res) => {
@@ -104,7 +131,7 @@ async function main(): Promise<void> {
   });
 
   // Start Slack adapter
-  const slack = new SlackAdapter(config, agentRunner);
+  const slack = new SlackAdapter(config, agentRunner, sessionManager);
   await slack.start();
 
   console.log(JSON.stringify({ type: "ready" }));

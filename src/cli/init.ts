@@ -572,6 +572,7 @@ async function deployToAws(config: InitConfig): Promise<void> {
     { name: "SLACK_BOT_TOKEN", value: config.slackBotToken },
     { name: "SLACK_APP_TOKEN", value: config.slackAppToken },
     { name: "GH_TOKEN", value: config.githubToken },
+    { name: "HOME", value: "/home/citio" },
   ];
 
   // Embed config as base64 so it doesn't need a file mount
@@ -590,6 +591,17 @@ async function deployToAws(config: InitConfig): Promise<void> {
     // No CITIO_NEEDS_AUTH — container doesn't do interactive auth
   }
 
+  const homeVolume = config.authMethod === "oauth"
+    ? {
+        name: "citio-home",
+        efsVolumeConfiguration: {
+          fileSystemId: efsId || "<EFS_ID>",
+          rootDirectory: "/",
+          transitEncryption: "ENABLED",
+        },
+      }
+    : null;
+
   const taskDef = {
     family: "citio",
     networkMode: "awsvpc",
@@ -599,6 +611,7 @@ async function deployToAws(config: InitConfig): Promise<void> {
     ephemeralStorage: { sizeInGiB: 100 },
     executionRoleArn: `arn:aws:iam::${accountId}:role/citio-task-execution`,
     taskRoleArn: `arn:aws:iam::${accountId}:role/citio-task-execution`,
+    volumes: homeVolume ? [homeVolume] : undefined,
     containerDefinitions: [
       {
         name: "citio",
@@ -606,6 +619,9 @@ async function deployToAws(config: InitConfig): Promise<void> {
         essential: true,
         portMappings: [{ containerPort: 3001, protocol: "tcp" }],
         environment: envVars,
+        mountPoints: homeVolume
+          ? [{ sourceVolume: "citio-home", containerPath: "/home/citio", readOnly: false }]
+          : undefined,
         logConfiguration: {
           logDriver: "awslogs",
           options: {

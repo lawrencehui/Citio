@@ -1,5 +1,9 @@
 import { App, Assistant } from "@slack/bolt";
+import { randomUUID } from "crypto";
+import { existsSync, readFileSync } from "fs";
+import path from "path";
 import { AgentRunner } from "../core/agent-runner.js";
+import { SessionManager } from "../core/session-manager.js";
 import type { CitioConfig } from "../config/schema.js";
 
 const CREDENTIAL_PATTERNS = [
@@ -24,10 +28,12 @@ export class SlackAdapter {
   private app: App;
   private config: CitioConfig;
   private agentRunner: AgentRunner;
+  private sessionManager: SessionManager;
 
-  constructor(config: CitioConfig, agentRunner: AgentRunner) {
+  constructor(config: CitioConfig, agentRunner: AgentRunner, sessionManager: SessionManager) {
     this.config = config;
     this.agentRunner = agentRunner;
+    this.sessionManager = sessionManager;
 
     this.app = new App({
       token: config.slack.bot_token,
@@ -146,10 +152,10 @@ export class SlackAdapter {
           }
 
           // Build the prompt with thread context
-          const prompt = this.buildPrompt(text, contextInfo);
+          const prompt = this.buildPrompt(text, contextInfo, `${channel}:${thread_ts}`);
 
           // Show queue status if busy
-          if (this.agentRunner.isRunning) {
+          if (this.agentRunner.isSaturated) {
             await say(`:hourglass: I'm working on another task. Yours is queued (position ${this.agentRunner.queueLength + 1}). I'll get to it shortly.`);
           }
 
@@ -167,15 +173,27 @@ export class SlackAdapter {
           }
 
           // Get existing thread mapping (for conversation continuity)
-          const existingThreadId = this.agentRunner.getThreadId(thread_ts);
+          const threadKey = `${channel}:${thread_ts}`;
+          const existingSessionId = this.sessionManager.get(threadKey);
+          const sessionId = existingSessionId || (this.config.engine.default_provider === "claude" ? randomUUID() : null);
+          if (sessionId && !existingSessionId) {
+            this.sessionManager.remember(threadKey, sessionId);
+          }
 
           // Submit to the agent
           let dmLastUpdate = Date.now();
           let dmAccOutput = "";
+          const stopProgressPolling = this.startProgressPolling(threadKey, (update) => {
+            dmAccOutput += `\n${update}`;
+          });
 
           await this.agentRunner.submit({
             prompt,
-            threadId: existingThreadId,
+            threadKey,
+            sessionId,
+            onSessionEstablished: (providerSessionId) => {
+              this.sessionManager.remember(threadKey, providerSessionId);
+            },
             onProgress: (chunk) => {
               dmAccOutput += chunk;
               const now = Date.now();
@@ -189,7 +207,8 @@ export class SlackAdapter {
                 }).catch(() => {});
               }
             },
-            onComplete: async (output, codexThreadId) => {
+            onComplete: async (output) => {
+              stopProgressPolling();
               const finalOutput = redactCredentials(output);
               try {
                 const truncated = finalOutput.length > 3900
@@ -210,6 +229,7 @@ export class SlackAdapter {
               }
             },
             onError: async (err) => {
+              stopProgressPolling();
               await say(`Sorry, something went wrong: ${err.message}`);
             },
           });
@@ -260,15 +280,28 @@ export class SlackAdapter {
         // Continue without
       }
 
-      const existingThreadId = this.agentRunner.getThreadId(threadTs);
-      const prompt = this.buildPrompt(text, "");
+      const threadKey = `${channel}:${threadTs}`;
+      const existingSessionId = this.sessionManager.get(threadKey);
+      const sessionId = existingSessionId || (this.config.engine.default_provider === "claude" ? randomUUID() : null);
+      if (sessionId && !existingSessionId) {
+        this.sessionManager.remember(threadKey, sessionId);
+      }
+
+      const prompt = this.buildPrompt(text, "", threadKey);
 
       let lastUpdateTime = Date.now();
       let accumulatedOutput = "";
+      const stopProgressPolling = this.startProgressPolling(threadKey, (update) => {
+        accumulatedOutput += `\n${update}`;
+      });
 
       await this.agentRunner.submit({
         prompt,
-        threadId: existingThreadId,
+        threadKey,
+        sessionId,
+        onSessionEstablished: (providerSessionId) => {
+          this.sessionManager.remember(threadKey, providerSessionId);
+        },
         onProgress: (chunk) => {
           accumulatedOutput += chunk;
           const now = Date.now();
@@ -283,7 +316,8 @@ export class SlackAdapter {
             }).catch(() => {});
           }
         },
-        onComplete: async (output, codexThreadId) => {
+        onComplete: async (output) => {
+          stopProgressPolling();
           const finalOutput = redactCredentials(output);
           try {
             const truncated = finalOutput.length > 3900
@@ -312,6 +346,7 @@ export class SlackAdapter {
           }
         },
         onError: async (err) => {
+          stopProgressPolling();
           await client.chat.postMessage({
             channel,
             text: `Sorry, something went wrong: ${err.message}`,
@@ -321,11 +356,13 @@ export class SlackAdapter {
     });
   }
 
-  private buildPrompt(userMessage: string, contextInfo: string): string {
+  private buildPrompt(userMessage: string, contextInfo: string, threadKey: string): string {
     const parts = [
       "You are Citio, an autonomous CTO agent. A team member is asking for help.",
-      "You have access to: aws CLI (uses IAM task role, NO --profile flag needed), gh CLI, git. Your workspace is at /workspace. List repos with ls /workspace.",
-      "For AWS commands: never use --profile. The IAM task role provides credentials automatically.",
+      "You should prefer the Citio MCP tools for repository investigation, file edits, pull requests, CI checks, and command execution.",
+      "If you use shell access, keep it to the minimum needed and do not assume direct credential access.",
+      "For AWS commands: never use --profile. The IAM task role provides credentials automatically when those commands are available.",
+      `If you want to send a structured progress update, call post_update with thread_key=\"${threadKey}\".`,
     ];
 
     if (contextInfo) {
@@ -350,6 +387,50 @@ Slack formatting rules:
 - Keep paragraphs short. Use single newlines between sections, not double.`);
 
     return parts.join("\n\n");
+  }
+
+  private startProgressPolling(threadKey: string, onUpdate: (text: string) => void): () => void {
+    const memoryDir = process.env.CITIO_MEMORY || "/memory";
+    const safeName = threadKey.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const progressPath = path.join(memoryDir, "progress", `${safeName}.jsonl`);
+    let offset = existsSync(progressPath) ? readFileSync(progressPath, "utf-8").length : 0;
+    let stopped = false;
+
+    const poll = () => {
+      if (stopped || !existsSync(progressPath)) {
+        return;
+      }
+
+      try {
+        const content = readFileSync(progressPath, "utf-8");
+        if (content.length <= offset) {
+          return;
+        }
+
+        const chunk = content.slice(offset);
+        offset = content.length;
+
+        for (const line of chunk.split("\n")) {
+          if (!line.trim()) continue;
+          try {
+            const entry = JSON.parse(line) as { text?: string };
+            if (entry.text) {
+              onUpdate(`[Progress] ${entry.text}`);
+            }
+          } catch {
+            // Ignore malformed lines from partial writes.
+          }
+        }
+      } catch {
+        // Best-effort only.
+      }
+    };
+
+    const interval = setInterval(poll, 2000);
+    return () => {
+      stopped = true;
+      clearInterval(interval);
+    };
   }
 
   async start(): Promise<void> {

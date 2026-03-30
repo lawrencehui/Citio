@@ -128,13 +128,18 @@ You have access to these tools via the MCP server:
 - run_command: Run allowlisted commands (git, npm, tsc, etc.)
 - check_ci_status: Check CI/CD status of a PR
 - save_finding: Save learnings to org memory
+- recall_context: Search saved org memory for prior findings
+- query_logs: Query CloudWatch logs from the task role
+- post_update: Record a progress update for the current Slack thread
+- query_audit_log: Search the recorded MCP tool audit trail
 
 ## Workflow
 1. When asked to investigate a bug, use investigate_codebase and read_file first
-2. Use post_update to keep the team informed of progress
-3. Create a branch before making changes
-4. Create a PR when your fix is ready
-5. Save any important findings with save_finding
+2. Use post_update for meaningful progress checkpoints, not every trivial step
+3. Use recall_context before repeating prior investigations
+4. Create a branch before making changes
+5. Create a PR when your fix is ready
+6. Save any important findings with save_finding
 
 ${skills}
 `;
