@@ -174,11 +174,9 @@ export class SlackAdapter {
 
           // Get existing thread mapping (for conversation continuity)
           const threadKey = `${channel}:${thread_ts}`;
+          // Only pass sessionId for follow-ups (resume), not first message
           const existingSessionId = this.sessionManager.get(threadKey);
-          const sessionId = existingSessionId || (this.config.engine.default_provider === "claude" ? randomUUID() : null);
-          if (sessionId && !existingSessionId) {
-            this.sessionManager.remember(threadKey, sessionId);
-          }
+          const sessionId = existingSessionId || null;
 
           // Submit to the agent
           let dmLastUpdate = Date.now();

@@ -140,8 +140,8 @@ export class AgentRunner {
       }
 
       if (task.sessionId) {
-        args.push("--session-id", task.sessionId);
-        task.onSessionEstablished?.(task.sessionId);
+        // Resume existing conversation
+        args.push("--resume", task.sessionId);
       }
 
       console.log(JSON.stringify({
@@ -171,9 +171,13 @@ export class AgentRunner {
           if (!line.trim()) continue;
           try {
             const event = JSON.parse(line);
+            // Capture session_id from result event
+            const sid = (event as Record<string, unknown>).session_id as string | undefined;
+            if (sid && !task.sessionId && task.onSessionEstablished) {
+              task.onSessionEstablished(sid);
+            }
             this.handleStreamEvent(event, task, (text) => { finalResult += text; });
           } catch {
-            // Not JSON — raw text output
             finalResult += line;
             if (task.onProgress) task.onProgress(line);
           }
@@ -182,9 +186,13 @@ export class AgentRunner {
 
       child.stderr?.on("data", (data: Buffer) => {
         const text = data.toString();
-        // Only log non-warning stderr
         if (!text.includes("no stdin data")) {
           console.log(JSON.stringify({ type: "agent_stderr", data: text.slice(0, 500) }));
+          // Capture session ID from stderr (Claude prints it there)
+          const match = text.match(/session[_ ]id[:\s]+([0-9a-f-]{36})/i);
+          if (match && !task.sessionId && task.onSessionEstablished) {
+            task.onSessionEstablished(match[1]);
+          }
         }
       });
 
