@@ -124,8 +124,6 @@ export class AgentRunner {
   private async runClaudeTask(task: QueuedTask): Promise<void> {
     return new Promise<void>((resolve) => {
       const model = process.env.CLAUDE_MODEL || "claude-opus-4-6";
-      const useBare = Boolean(process.env.ANTHROPIC_API_KEY);
-
       const args = [
         "-p", task.prompt,
         "--output-format", "stream-json",
@@ -134,10 +132,6 @@ export class AgentRunner {
         "--verbose",
         "--mcp-config", this.mcpConfigPath,
       ];
-
-      if (useBare) {
-        args.unshift("--bare");
-      }
 
       if (task.sessionId) {
         // Resume existing conversation
@@ -148,7 +142,6 @@ export class AgentRunner {
         type: "agent_spawn",
         provider: "claude",
         model,
-        bare: useBare,
         prompt_preview: task.prompt.slice(0, 100),
         queue_remaining: this.queue.length,
       }));
