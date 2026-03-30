@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import * as p from "@clack/prompts";
-import { execSync } from "child_process";
+import { execSync, execFileSync } from "child_process";
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from "fs";
 import path from "path";
+import os from "os";
 import { stringify } from "yaml";
-import { normalizeClaudeOauthToken, validateClaudeOauthToken } from "../utils/claude.js";
+import { extractClaudeOauthTokenFromTranscript, normalizeClaudeOauthToken, validateClaudeOauthToken } from "../utils/claude.js";
 
 interface InitConfig {
   provider: "codex" | "claude";
@@ -91,11 +92,22 @@ async function ensurePortableClaudeAuth(homeDir: string): Promise<string> {
     "Running `claude setup-token` to create a long-lived token for ECS..."
   );
 
+  let extractedToken = "";
   try {
-    execSync("claude setup-token", { stdio: "inherit", timeout: 300000 });
+    const transcriptPath = path.join(os.tmpdir(), `citio-claude-setup-token-${Date.now()}.log`);
+    execFileSync("script", ["-q", transcriptPath, "claude", "setup-token"], {
+      stdio: "inherit",
+      timeout: 300000,
+    });
+    extractedToken = extractClaudeOauthTokenFromTranscript(transcriptPath) || "";
   } catch {
     p.log.error("`claude setup-token` failed. Re-run `citio` later or use API key auth.");
     process.exit(1);
+  }
+
+  if (extractedToken && validateClaudeOauthToken(extractedToken)) {
+    p.log.success("Captured and verified Claude OAuth token from `claude setup-token`.");
+    return extractedToken;
   }
 
   const token = (await p.text({
