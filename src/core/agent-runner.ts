@@ -16,6 +16,26 @@ interface QueuedTask {
   onError: (error: Error) => void;
 }
 
+function appendDedupedText(current: string, next: string): string {
+  if (!next) {
+    return current;
+  }
+
+  if (!current) {
+    return next;
+  }
+
+  if (current === next || current.endsWith(next)) {
+    return current;
+  }
+
+  if (next.startsWith(current)) {
+    return next;
+  }
+
+  return `${current}${next}`;
+}
+
 export class AgentRunner {
   private config: CitioConfig;
   private queue: QueuedTask[] = [];
@@ -156,6 +176,7 @@ export class AgentRunner {
 
       let finalResult = "";
       let lineBuffer = "";
+      let sawClaudeTextDelta = false;
 
       child.stdout?.on("data", (data: Buffer) => {
         lineBuffer += data.toString();
@@ -171,9 +192,17 @@ export class AgentRunner {
             if (sid && !task.sessionId && task.onSessionEstablished) {
               task.onSessionEstablished(sid);
             }
-            this.handleStreamEvent(event, task, (text) => { finalResult += text; });
+            this.handleStreamEvent(event, task, {
+              appendResult: (text) => {
+                finalResult = appendDedupedText(finalResult, text);
+              },
+              sawTextDelta: () => {
+                sawClaudeTextDelta = true;
+              },
+              hasTextDelta: () => sawClaudeTextDelta,
+            });
           } catch {
-            finalResult += line;
+            finalResult = appendDedupedText(finalResult, line);
             if (task.onProgress) task.onProgress(line);
           }
         }
@@ -196,9 +225,17 @@ export class AgentRunner {
         if (lineBuffer.trim()) {
           try {
             const event = JSON.parse(lineBuffer);
-            this.handleStreamEvent(event, task, (text) => { finalResult += text; });
+            this.handleStreamEvent(event, task, {
+              appendResult: (text) => {
+                finalResult = appendDedupedText(finalResult, text);
+              },
+              sawTextDelta: () => {
+                sawClaudeTextDelta = true;
+              },
+              hasTextDelta: () => sawClaudeTextDelta,
+            });
           } catch {
-            finalResult += lineBuffer;
+            finalResult = appendDedupedText(finalResult, lineBuffer);
           }
         }
 
@@ -353,33 +390,39 @@ export class AgentRunner {
   private handleStreamEvent(
     event: Record<string, unknown>,
     task: QueuedTask,
-    appendResult: (text: string) => void
+    state: {
+      appendResult: (text: string) => void;
+      sawTextDelta: () => void;
+      hasTextDelta: () => boolean;
+    }
   ): void {
     const type = event.type as string;
 
     if (type === "result") {
       // Final result
       const result = event.result as string;
-      if (result) appendResult(result);
+      if (result && !state.hasTextDelta()) {
+        state.appendResult(result);
+      }
     } else if (type === "assistant" && event.message) {
-      // Assistant message with content blocks
-      const msg = event.message as { content?: Array<{ type: string; text?: string; name?: string }> };
+      // Assistant message with content blocks. Text is typically streamed again via
+      // content_block_delta events, so only surface tool usage here.
+      const msg = event.message as { content?: Array<{ type: string; name?: string }> };
       for (const block of msg.content || []) {
-        if (block.type === "text" && block.text) {
-          appendResult(block.text);
-        } else if (block.type === "tool_use" && block.name) {
+        if (block.type === "tool_use" && block.name) {
           if (task.onProgress) task.onProgress(`Using tool: ${block.name}`);
         }
       }
     } else if (type === "content_block_delta") {
       const delta = event.delta as { type?: string; text?: string };
       if (delta?.type === "text_delta" && delta.text) {
-        appendResult(delta.text);
+        state.sawTextDelta();
+        state.appendResult(delta.text);
       }
     } else if (type === "stream_event") {
       // Nested stream event
       const inner = event.event as Record<string, unknown> | undefined;
-      if (inner) this.handleStreamEvent(inner, task, appendResult);
+      if (inner) this.handleStreamEvent(inner, task, state);
     }
   }
 
