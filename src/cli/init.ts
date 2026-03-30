@@ -4,7 +4,7 @@ import { execSync } from "child_process";
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from "fs";
 import path from "path";
 import { stringify } from "yaml";
-import { validateClaudeOauthToken } from "../utils/claude.js";
+import { normalizeClaudeOauthToken, validateClaudeOauthToken } from "../utils/claude.js";
 
 interface InitConfig {
   provider: "codex" | "claude";
@@ -81,7 +81,7 @@ async function ensurePortableClaudeAuth(homeDir: string): Promise<string> {
   if (process.env.CLAUDE_CODE_OAUTH_TOKEN) {
     if (validateClaudeOauthToken(process.env.CLAUDE_CODE_OAUTH_TOKEN)) {
       p.log.success("Verified Claude OAuth token from CLAUDE_CODE_OAUTH_TOKEN.");
-      return process.env.CLAUDE_CODE_OAUTH_TOKEN;
+      return normalizeClaudeOauthToken(process.env.CLAUDE_CODE_OAUTH_TOKEN);
     }
 
     p.log.warn("CLAUDE_CODE_OAUTH_TOKEN is set but did not validate. Falling back to local Claude auth checks.");
@@ -104,7 +104,9 @@ async function ensurePortableClaudeAuth(homeDir: string): Promise<string> {
 
   if (p.isCancel(token)) process.exit(0);
 
-  if (!validateClaudeOauthToken(token)) {
+  const normalizedToken = normalizeClaudeOauthToken(token);
+
+  if (!validateClaudeOauthToken(normalizedToken)) {
     p.log.error(
       "That Claude OAuth token did not validate from a clean environment. Re-run `claude setup-token` and paste the full token exactly."
     );
@@ -112,7 +114,7 @@ async function ensurePortableClaudeAuth(homeDir: string): Promise<string> {
   }
 
   p.log.success("Verified portable Claude OAuth token. It will be deployed as CLAUDE_CODE_OAUTH_TOKEN.");
-  return token;
+  return normalizedToken;
 }
 
 async function collectConfig(): Promise<InitConfig> {

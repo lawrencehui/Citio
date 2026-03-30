@@ -5,7 +5,12 @@ import path from "path";
 
 const CLAUDE_AUTH_PROMPT = "Reply with exactly OK";
 
+export function normalizeClaudeOauthToken(token: string): string {
+  return token.replace(/\s+/g, "");
+}
+
 export function validateClaudeOauthToken(token: string): boolean {
+  const normalizedToken = normalizeClaudeOauthToken(token);
   const tempHome = mkdtempSync(path.join(os.tmpdir(), "citio-claude-token-"));
 
   try {
@@ -19,7 +24,7 @@ export function validateClaudeOauthToken(token: string): boolean {
           PATH: process.env.PATH || "/usr/local/bin:/usr/bin:/bin",
           TERM: process.env.TERM || "xterm-256color",
           NODE_ENV: process.env.NODE_ENV || "production",
-          CLAUDE_CODE_OAUTH_TOKEN: token,
+          CLAUDE_CODE_OAUTH_TOKEN: normalizedToken,
         },
         timeout: 120000,
         maxBuffer: 1024 * 1024,
