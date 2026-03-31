@@ -19,7 +19,7 @@ export const CitioConfigSchema = z.object({
   engine: z.object({
     default_provider: z.enum(["codex", "claude"]).default("codex"),
     max_session_duration_minutes: z.number().default(60),
-    max_concurrent_sessions: z.number().default(2),
+    max_concurrent_sessions: z.number().default(1),
     providers: z.object({
       codex: ProviderConfigSchema.optional(),
       claude: ProviderConfigSchema.optional(),

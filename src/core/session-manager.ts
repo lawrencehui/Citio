@@ -2,39 +2,63 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import path from "path";
 
 type ProviderName = "claude" | "codex";
+const GLOBAL_SESSION_KEY = "__provider_session__";
 
 interface SessionRecord {
   provider: ProviderName;
   sessionId: string;
+  runtimeId: string;
   updatedAt: string;
 }
 
 export class SessionManager {
   private readonly provider: ProviderName;
+  private readonly runtimeId: string;
   private readonly storagePath: string;
   private readonly sessions = new Map<string, SessionRecord>();
 
-  constructor(provider: ProviderName, memoryPath: string) {
+  constructor(provider: ProviderName, memoryPath: string, runtimeId: string) {
     this.provider = provider;
+    this.runtimeId = runtimeId;
     this.storagePath = path.join(memoryPath, "sessions.json");
     this.load();
   }
 
   get(threadKey: string): string | null {
-    const record = this.sessions.get(threadKey);
-    if (!record || record.provider !== this.provider) {
-      return null;
+    const exactRecord = this.sessions.get(threadKey);
+    if (this.isUsableRecord(exactRecord)) {
+      return exactRecord.sessionId;
     }
 
-    return record.sessionId;
+    const globalRecord = this.sessions.get(GLOBAL_SESSION_KEY);
+    if (this.isUsableRecord(globalRecord)) {
+      return globalRecord.sessionId;
+    }
+
+    let latestRecord: SessionRecord | null = null;
+    for (const [key, record] of this.sessions.entries()) {
+      if (key === GLOBAL_SESSION_KEY || !this.isUsableRecord(record)) {
+        continue;
+      }
+
+      if (!latestRecord || record.updatedAt > latestRecord.updatedAt) {
+        latestRecord = record;
+      }
+    }
+
+    return latestRecord?.sessionId || null;
   }
 
   remember(threadKey: string, sessionId: string): void {
-    this.sessions.set(threadKey, {
+    const record = {
       provider: this.provider,
       sessionId,
+      runtimeId: this.runtimeId,
       updatedAt: new Date().toISOString(),
-    });
+    };
+
+    this.sessions.set(GLOBAL_SESSION_KEY, record);
+    this.sessions.set(threadKey, record);
     this.persist();
   }
 
@@ -64,5 +88,14 @@ export class SessionManager {
 
     const raw = Object.fromEntries(this.sessions.entries());
     writeFileSync(this.storagePath, JSON.stringify(raw, null, 2), "utf-8");
+  }
+
+  private isUsableRecord(record: SessionRecord | null | undefined): record is SessionRecord {
+    return Boolean(
+      record &&
+      record.provider === this.provider &&
+      record.sessionId &&
+      record.runtimeId === this.runtimeId
+    );
   }
 }

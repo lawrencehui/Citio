@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 import * as p from "@clack/prompts";
 import { execSync, execFileSync } from "child_process";
-import { writeFileSync, readFileSync, existsSync, mkdirSync } from "fs";
+import { writeFileSync, readFileSync, existsSync, mkdirSync, chmodSync } from "fs";
 import path from "path";
 import os from "os";
 import { stringify } from "yaml";
 import { extractClaudeOauthTokenFromTranscript, normalizeClaudeOauthToken, validateClaudeOauthToken } from "../utils/claude.js";
+import { loadSavedInstallerState, saveInstallerState } from "../utils/installer-state.js";
 
 interface InitConfig {
   provider: "codex" | "claude";
@@ -130,10 +131,50 @@ async function ensurePortableClaudeAuth(homeDir: string): Promise<string> {
   return normalizedToken;
 }
 
+async function reuseOrPromptSecret(options: {
+  message: string;
+  existingValue?: string;
+  validate?: (value: string | undefined) => string | Error | undefined;
+}): Promise<string> {
+  const value = await p.password({
+    message: options.existingValue
+      ? `${options.message} (press Enter to keep saved value)`
+      : options.message,
+    validate: (input) => {
+      if (!input && options.existingValue) {
+        return undefined;
+      }
+      return options.validate ? options.validate(input) : undefined;
+    },
+  });
+
+  if (p.isCancel(value)) process.exit(0);
+  if (!value && options.existingValue) {
+    return options.existingValue;
+  }
+  return value;
+}
+
 async function collectConfig(): Promise<InitConfig> {
+  const savedState = await loadSavedInstallerState(process.cwd());
+  const hasSavedState = Boolean(
+    savedState.provider ||
+    savedState.authMethod ||
+    savedState.slackBotToken ||
+    savedState.slackAppToken ||
+    savedState.githubToken ||
+    savedState.claudeOauthToken ||
+    savedState.repos.length > 0
+  );
+
+  if (hasSavedState) {
+    p.log.info(`Found existing installer state. Reusing defaults from app config and ${savedState.secretBackend}.`);
+  }
+
   // Provider selection
   const provider = (await p.select({
     message: "Which agent engine?",
+    initialValue: savedState.provider,
     options: [
       {
         value: "codex",
@@ -152,6 +193,7 @@ async function collectConfig(): Promise<InitConfig> {
   // Provider auth method
   const authMethod = (await p.select({
     message: "How should the agent authenticate?",
+    initialValue: savedState.authMethod,
     options: [
       {
         value: "oauth",
@@ -178,7 +220,15 @@ async function collectConfig(): Promise<InitConfig> {
     const authPath = `${homeDir}/.codex/auth.json`;
 
     if (provider === "claude") {
-      claudeOauthToken = await ensurePortableClaudeAuth(homeDir);
+      if (savedState.claudeOauthToken && validateClaudeOauthToken(savedState.claudeOauthToken)) {
+        const token = await reuseOrPromptSecret({
+          message: "Claude OAuth token",
+          existingValue: savedState.claudeOauthToken,
+        });
+        claudeOauthToken = normalizeClaudeOauthToken(token);
+      } else {
+        claudeOauthToken = await ensurePortableClaudeAuth(homeDir);
+      }
     } else if (existsSync(authPath)) {
       p.log.success(
         `Found existing ${provider === "codex" ? "Codex" : "Claude Code"} credentials at ${authPath}. ` +
@@ -204,12 +254,12 @@ async function collectConfig(): Promise<InitConfig> {
       }
     }
   } else {
-    providerApiKey = (await p.password({
+    providerApiKey = await reuseOrPromptSecret({
       message: provider === "codex"
         ? "Enter your OpenAI API key (OPENAI_API_KEY):"
         : "Enter your Anthropic API key (ANTHROPIC_API_KEY):",
-    })) as string;
-    if (p.isCancel(providerApiKey)) process.exit(0);
+      existingValue: provider === "codex" ? savedState.openAiApiKey : savedState.anthropicApiKey,
+    });
   }
 
   // Slack setup
@@ -217,19 +267,23 @@ async function collectConfig(): Promise<InitConfig> {
     "Create a Slack app at https://api.slack.com/apps with Socket Mode enabled.\nYou need: Bot Token (xoxb-...) and App Token (xapp-...)."
   );
 
-  const slackBotToken = (await p.password({
+  const slackBotToken = await reuseOrPromptSecret({
     message: "Slack Bot Token (xoxb-...):",
-  })) as string;
-  if (p.isCancel(slackBotToken)) process.exit(0);
+    existingValue: savedState.slackBotToken,
+  });
 
-  const slackAppToken = (await p.password({
+  const slackAppToken = await reuseOrPromptSecret({
     message: "Slack App Token (xapp-...):",
-  })) as string;
-  if (p.isCancel(slackAppToken)) process.exit(0);
+    existingValue: savedState.slackAppToken,
+  });
 
   const slackChannelId = (await p.text({
-    message: "Slack Channel ID (e.g. C0123456789):",
+    message: savedState.slackChannelId
+      ? "Slack Channel ID (press Enter to keep saved value):"
+      : "Slack Channel ID (e.g. C0123456789):",
     placeholder: "C0123456789",
+    defaultValue: savedState.slackChannelId,
+    initialValue: savedState.slackChannelId,
   })) as string;
   if (p.isCancel(slackChannelId)) process.exit(0);
 
@@ -238,10 +292,10 @@ async function collectConfig(): Promise<InitConfig> {
     "Create a fine-grained GitHub PAT at https://github.com/settings/tokens\nPermissions needed: contents:write, pull_requests:write on your repos."
   );
 
-  const githubToken = (await p.password({
+  const githubToken = await reuseOrPromptSecret({
     message: "GitHub Personal Access Token:",
-  })) as string;
-  if (p.isCancel(githubToken)) process.exit(0);
+    existingValue: savedState.githubToken,
+  });
 
   // Repos — fetch available repos from GitHub using the PAT
   let repos: Array<{ url: string; branch: string }> = [];
@@ -266,6 +320,7 @@ async function collectConfig(): Promise<InitConfig> {
           label: r.full_name,
           hint: `${r.private ? "private" : "public"} · ${r.default_branch} · updated ${r.updated_at.split("T")[0]}`,
         })),
+        initialValues: savedState.repos.map((repo) => repo.url),
         required: true,
       })) as string[];
 
@@ -285,8 +340,12 @@ async function collectConfig(): Promise<InitConfig> {
   // Fallback to manual entry if auto-fetch failed or returned nothing
   if (repos.length === 0) {
     const repoInput = (await p.text({
-      message: "Repository URL(s) (comma-separated):",
+      message: savedState.repos.length > 0
+        ? "Repository URL(s) (comma-separated, press Enter to keep saved value):"
+        : "Repository URL(s) (comma-separated):",
       placeholder: "https://github.com/org/repo.git",
+      defaultValue: savedState.repos.map((repo) => repo.url).join(", "),
+      initialValue: savedState.repos.map((repo) => repo.url).join(", "),
     })) as string;
     if (p.isCancel(repoInput)) process.exit(0);
 
@@ -298,10 +357,16 @@ async function collectConfig(): Promise<InitConfig> {
 
   // Rules
   const rulesInput = (await p.text({
-    message: "Agent rules (one per line, or press Enter for defaults):",
+    message: savedState.rules.length > 0
+      ? "Agent rules (one per line, press Enter to keep saved value):"
+      : "Agent rules (one per line, or press Enter for defaults):",
     placeholder: "Always create PRs. Never push to main.",
-    defaultValue:
-      "Always create PRs for code changes. Never push directly to main.\nWhen investigating bugs, check logs first before making code changes.\nReport findings back to the team with clear summaries.",
+    defaultValue: savedState.rules.length > 0
+      ? savedState.rules.join("\n")
+      : "Always create PRs for code changes. Never push directly to main.\nWhen investigating bugs, check logs first before making code changes.\nReport findings back to the team with clear summaries.",
+    initialValue: savedState.rules.length > 0
+      ? savedState.rules.join("\n")
+      : undefined,
   })) as string;
   if (p.isCancel(rulesInput)) process.exit(0);
 
@@ -315,15 +380,19 @@ async function collectConfig(): Promise<InitConfig> {
       label: name,
       hint: info.description,
     })),
+    initialValues: savedState.skills,
     required: false,
   })) as string[];
   if (p.isCancel(skillChoices)) process.exit(0);
 
   // AWS config
   const awsRegion = (await p.text({
-    message: "AWS Region:",
+    message: savedState.awsRegion
+      ? "AWS Region (press Enter to keep saved value):"
+      : "AWS Region:",
     placeholder: "us-east-1",
-    defaultValue: "us-east-1",
+    defaultValue: savedState.awsRegion || "us-east-1",
+    initialValue: savedState.awsRegion || "us-east-1",
   })) as string;
   if (p.isCancel(awsRegion)) process.exit(0);
 
@@ -339,6 +408,7 @@ async function collectConfig(): Promise<InitConfig> {
     if (profiles.length > 1) {
       awsProfile = (await p.select({
         message: "AWS Profile:",
+        initialValue: savedState.awsProfile,
         options: profiles.map((profile) => ({
           value: profile,
           label: profile,
@@ -353,8 +423,8 @@ async function collectConfig(): Promise<InitConfig> {
   }
 
   const enableEfs = (await p.confirm({
-    message: "Enable org memory (EFS volume)? Recommended for persistent learning.",
-    initialValue: true,
+    message: "Enable EFS persistence for workspace, memory, and auth? Recommended for repo state across redeploys.",
+    initialValue: savedState.enableEfs ?? true,
   })) as boolean;
   if (p.isCancel(enableEfs)) process.exit(0);
 
@@ -376,8 +446,12 @@ async function collectConfig(): Promise<InitConfig> {
   };
 }
 
-function writeConfigFile(config: InitConfig): void {
-  const yamlConfig = {
+function buildYamlConfig(config: InitConfig): Record<string, unknown> {
+  const skillsDirectory = config.enableEfs
+    ? "/home/citio/workspace/.citio/skills/"
+    : "/workspace/.citio/skills/";
+
+  return {
     name: "citio",
     version: 1,
     slack: {
@@ -389,7 +463,7 @@ function writeConfigFile(config: InitConfig): void {
     engine: {
       default_provider: config.provider,
       max_session_duration_minutes: 60,
-      max_concurrent_sessions: 2,
+      max_concurrent_sessions: 1,
       auth_method: config.authMethod,
       providers: {
         codex: config.provider === "codex" && config.authMethod === "api_key"
@@ -400,7 +474,7 @@ function writeConfigFile(config: InitConfig): void {
     },
     skills: {
       installed: config.skills,
-      directory: "/workspace/.citio/skills/",
+      directory: skillsDirectory,
     },
     workspace: {
       repos: config.repos,
@@ -413,34 +487,20 @@ function writeConfigFile(config: InitConfig): void {
         ecr_repo: "citio",
         ecs_cluster: "citio",
         ecs_service: "citio",
-        task_cpu: 1024,
-        task_memory: 4096,
+        profile: config.awsProfile,
+        enable_efs: config.enableEfs,
+        task_cpu: 2048,
+        task_memory: 8192,
         ephemeral_storage_gb: 100,
       },
     },
   };
+}
 
+function writeConfigFile(config: InitConfig): void {
+  const yamlConfig = buildYamlConfig(config);
   writeFileSync("citio.yaml", stringify(yamlConfig), "utf-8");
-
-  // Write .env file (not committed)
-  const envLines = [
-    `SLACK_BOT_TOKEN=${config.slackBotToken}`,
-    `SLACK_APP_TOKEN=${config.slackAppToken}`,
-    `GH_TOKEN=${config.githubToken}`,
-    `AWS_DEFAULT_REGION=${config.awsRegion}`,
-  ];
-
-  if (config.authMethod === "api_key" && config.providerApiKey) {
-    envLines.push(
-      config.provider === "codex"
-        ? `OPENAI_API_KEY=${config.providerApiKey}`
-        : `ANTHROPIC_API_KEY=${config.providerApiKey}`
-    );
-  } else if (config.provider === "claude" && config.claudeOauthToken) {
-    envLines.push(`CLAUDE_CODE_OAUTH_TOKEN=${config.claudeOauthToken}`);
-  }
-
-  writeFileSync(".env", envLines.join("\n") + "\n", "utf-8");
+  chmodSync("citio.yaml", 0o600);
 }
 
 function installSkills(skills: string[], githubToken: string): void {
@@ -636,6 +696,13 @@ async function deployToAws(config: InitConfig): Promise<void> {
     { name: "HOME", value: "/home/citio" },
   ];
 
+  if (config.enableEfs) {
+    envVars.push(
+      { name: "CITIO_WORKSPACE", value: "/home/citio/workspace" },
+      { name: "CITIO_MEMORY", value: "/home/citio/memory" },
+    );
+  }
+
   // Embed config as base64 so it doesn't need a file mount
   const configYaml = readFileSync("citio.yaml", "utf-8");
   const configB64 = Buffer.from(configYaml).toString("base64");
@@ -654,7 +721,7 @@ async function deployToAws(config: InitConfig): Promise<void> {
     // No CITIO_NEEDS_AUTH — container doesn't do interactive auth
   }
 
-  const homeVolume = config.authMethod === "oauth"
+  const homeVolume = (config.enableEfs || config.authMethod === "oauth")
     ? {
         name: "citio-home",
         efsVolumeConfiguration: {
@@ -669,8 +736,8 @@ async function deployToAws(config: InitConfig): Promise<void> {
     family: "citio",
     networkMode: "awsvpc",
     requiresCompatibilities: ["FARGATE"],
-    cpu: "1024",
-    memory: "4096",
+    cpu: "2048",
+    memory: "8192",
     ephemeralStorage: { sizeInGiB: 100 },
     executionRoleArn: `arn:aws:iam::${accountId}:role/citio-task-execution`,
     taskRoleArn: `arn:aws:iam::${accountId}:role/citio-task-execution`,
@@ -944,7 +1011,28 @@ async function main(): Promise<void> {
   // Write config files
   s.start("Writing configuration...");
   writeConfigFile(config);
-  s.stop("Configuration saved to citio.yaml and .env");
+  const secretBackend = await saveInstallerState(
+    {
+      provider: config.provider,
+      authMethod: config.authMethod,
+      slackChannelId: config.slackChannelId,
+      repos: config.repos,
+      rules: config.rules,
+      skills: config.skills,
+      awsRegion: config.awsRegion,
+      awsProfile: config.awsProfile,
+      enableEfs: config.enableEfs,
+    },
+    {
+      slackBotToken: config.slackBotToken,
+      slackAppToken: config.slackAppToken,
+      githubToken: config.githubToken,
+      claudeOauthToken: config.claudeOauthToken || undefined,
+      openAiApiKey: config.provider === "codex" && config.authMethod === "api_key" ? config.providerApiKey : undefined,
+      anthropicApiKey: config.provider === "claude" && config.authMethod === "api_key" ? config.providerApiKey : undefined,
+    }
+  );
+  s.stop(`Configuration saved to citio.yaml. Secrets saved to ${secretBackend}.`);
 
   // Install skills
   if (config.skills.length > 0) {
@@ -962,13 +1050,8 @@ async function main(): Promise<void> {
   if (shouldDeploy) {
     await deployToAws(config);
   } else {
-    const authMount = config.authMethod === "oauth"
-      ? config.provider === "claude"
-        ? " -e CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN"
-        : " -v ~/.codex/auth.json:/home/citio/.codex/auth.json:ro"
-      : "";
     p.log.info(
-      `Skipping deploy. Run manually with:\n  docker build -t citio . && docker run --env-file .env${authMount} citio`
+      "Skipping deploy. Secrets are stored outside the repo now, so local docker runs need explicit env vars or provider auth mounts."
     );
   }
 

@@ -110,13 +110,15 @@ export class WorkspaceManager {
   }
 
   private generateInstructionFiles(): void {
-    const rules = this.config.workspace.rules.join("\n- ");
     const skills = this.loadSkills();
 
-    const instructionContent = `# Citio Agent Instructions
+    const baseInstructionContent = `# Citio Agent Instructions
 
 ## Rules
-- ${rules}
+- Always create PRs for code changes. Never push directly to main.
+- When investigating bugs, check logs first before making code changes.
+- Report findings back to the team with clear summaries.
+- After any update or change pushed to a PR, always quote the PR link in your response.
 
 ## Available MCP Tools
 You have access to these tools via the MCP server:
@@ -141,10 +143,11 @@ You have access to these tools via the MCP server:
 5. Use recall_context before repeating prior investigations
 6. Create a branch before making changes
 7. Create a PR when your fix is ready
-8. Save any important findings with save_finding
+8. Save any important findings with save_finding`;
 
-${skills}
-`;
+    const instructionContent = skills
+      ? `${baseInstructionContent}\n\n${skills}\n`
+      : `${baseInstructionContent}\n`;
 
     // Write CLAUDE.md for Claude Code
     writeFileSync(

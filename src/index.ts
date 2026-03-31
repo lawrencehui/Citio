@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { randomUUID } from "crypto";
 import { readFileSync } from "fs";
 import { parse } from "yaml";
 import { CitioConfigSchema } from "./config/schema.js";
@@ -106,9 +107,12 @@ async function main(): Promise<void> {
   // Initialize agent runner (long-running MCP server for Codex, or -p for Claude)
   const agentRunner = new AgentRunner(config, workspacePath);
   await agentRunner.start();
+  const runtimeId = randomUUID();
+  console.log(JSON.stringify({ type: "runtime_session_scope", runtimeId }));
   const sessionManager = new SessionManager(
     config.engine.default_provider,
-    process.env.CITIO_MEMORY || "/memory"
+    process.env.CITIO_MEMORY || "/memory",
+    runtimeId
   );
 
   // Health check server

@@ -1,5 +1,4 @@
 import { App, Assistant } from "@slack/bolt";
-import { randomUUID } from "crypto";
 import { existsSync, readFileSync } from "fs";
 import path from "path";
 import { AgentRunner } from "../core/agent-runner.js";
@@ -230,8 +229,7 @@ export class SlackAdapter {
           // Get existing thread mapping (for conversation continuity)
           const threadKey = `${channel}:${thread_ts}`;
           // Only pass sessionId for follow-ups (resume), not first message
-          const existingSessionId = this.sessionManager.get(threadKey);
-          const sessionId = existingSessionId || null;
+          const sessionId = this.getProviderSessionId(threadKey);
 
           // Submit to the agent
           let dmLastUpdate = Date.now();
@@ -251,7 +249,7 @@ export class SlackAdapter {
             threadKey,
             sessionId,
             onSessionEstablished: (providerSessionId) => {
-              this.sessionManager.remember(threadKey, providerSessionId);
+              this.rememberProviderSession(threadKey, providerSessionId);
             },
             onProgress: (chunk) => {
               const normalized = normalizeProgressChunk(chunk);
@@ -345,11 +343,7 @@ export class SlackAdapter {
       }
 
       const threadKey = `${channel}:${threadTs}`;
-      const existingSessionId = this.sessionManager.get(threadKey);
-      const sessionId = existingSessionId || (this.config.engine.default_provider === "claude" ? randomUUID() : null);
-      if (sessionId && !existingSessionId) {
-        this.sessionManager.remember(threadKey, sessionId);
-      }
+      const sessionId = this.getProviderSessionId(threadKey);
 
       const prompt = this.buildPrompt(text, "", threadKey);
 
@@ -370,7 +364,7 @@ export class SlackAdapter {
         threadKey,
         sessionId,
         onSessionEstablished: (providerSessionId) => {
-          this.sessionManager.remember(threadKey, providerSessionId);
+          this.rememberProviderSession(threadKey, providerSessionId);
         },
         onProgress: (chunk) => {
           const normalized = normalizeProgressChunk(chunk);
@@ -429,6 +423,14 @@ export class SlackAdapter {
         },
       });
     });
+  }
+
+  private getProviderSessionId(threadKey: string): string | null {
+    return this.sessionManager.get(threadKey);
+  }
+
+  private rememberProviderSession(threadKey: string, sessionId: string): void {
+    this.sessionManager.remember(threadKey, sessionId);
   }
 
   private buildPrompt(userMessage: string, contextInfo: string, threadKey: string): string {

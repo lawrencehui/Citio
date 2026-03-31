@@ -40,7 +40,6 @@ export class AgentRunner {
   private config: CitioConfig;
   private queue: QueuedTask[] = [];
   private activeCount = 0;
-  private activeThreadKeys = new Set<string>();
   private workspacePath: string;
   private mcpConfigPath: string;
 
@@ -91,7 +90,7 @@ export class AgentRunner {
   }
 
   get isSaturated(): boolean {
-    return this.activeCount >= this.config.engine.max_concurrent_sessions;
+    return this.activeCount >= 1;
   }
 
   async start(): Promise<void> {
@@ -109,19 +108,15 @@ export class AgentRunner {
   }
 
   private async processQueue(): Promise<void> {
-    while (this.activeCount < this.config.engine.max_concurrent_sessions) {
-      const index = this.queue.findIndex((candidate) => !this.activeThreadKeys.has(candidate.threadKey));
-      if (index === -1) {
-        return;
-      }
-
-      const [task] = this.queue.splice(index, 1);
+    // Citio hosts a single long-lived provider session per container, so
+    // only one task can safely run at a time regardless of Slack thread.
+    while (this.activeCount < 1) {
+      const task = this.queue.shift();
       if (!task) {
         return;
       }
 
       this.activeCount += 1;
-      this.activeThreadKeys.add(task.threadKey);
 
       void this.runTask(task)
         .catch((err) => {
@@ -129,7 +124,6 @@ export class AgentRunner {
         })
         .finally(() => {
           this.activeCount -= 1;
-          this.activeThreadKeys.delete(task.threadKey);
           void this.processQueue();
         });
     }
@@ -145,245 +139,286 @@ export class AgentRunner {
 
   private async runClaudeTask(task: QueuedTask): Promise<void> {
     return new Promise<void>((resolve) => {
-      const model = process.env.CLAUDE_MODEL || "claude-opus-4-6";
-      const args = [
-        "-p", task.prompt,
-        "--output-format", "stream-json",
-        "--dangerously-skip-permissions",
-        "--model", model,
-        "--verbose",
-        "--mcp-config", this.mcpConfigPath,
-      ];
+      const attempt = (sessionId: string | null | undefined, allowResumeFallback: boolean): void => {
+        const model = process.env.CLAUDE_MODEL || "claude-opus-4-6";
+        const args = [
+          "-p", task.prompt,
+          "--output-format", "stream-json",
+          "--dangerously-skip-permissions",
+          "--model", model,
+          "--verbose",
+          "--mcp-config", this.mcpConfigPath,
+        ];
 
-      if (task.sessionId) {
-        // Resume existing conversation
-        args.push("--resume", task.sessionId);
-      }
-
-      console.log(JSON.stringify({
-        type: "agent_spawn",
-        provider: "claude",
-        model,
-        prompt_preview: task.prompt.slice(0, 100),
-        queue_remaining: this.queue.length,
-      }));
-
-      const child = spawn("claude", args, {
-        cwd: this.workspacePath,
-        stdio: ["pipe", "pipe", "pipe"],
-        env: this.buildClaudeEnv(),
-      });
-
-      let finalResult = "";
-      let lineBuffer = "";
-      let sawClaudeTextDelta = false;
-
-      child.stdout?.on("data", (data: Buffer) => {
-        lineBuffer += data.toString();
-        const lines = lineBuffer.split("\n");
-        lineBuffer = lines.pop() || "";
-
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const event = JSON.parse(line);
-            // Capture session_id from result event
-            const sid = (event as Record<string, unknown>).session_id as string | undefined;
-            if (sid && !task.sessionId && task.onSessionEstablished) {
-              task.onSessionEstablished(sid);
-            }
-            this.handleStreamEvent(event, task, {
-              appendResult: (text) => {
-                finalResult = appendDedupedText(finalResult, text);
-              },
-              sawTextDelta: () => {
-                sawClaudeTextDelta = true;
-              },
-              hasTextDelta: () => sawClaudeTextDelta,
-            });
-          } catch {
-            finalResult = appendDedupedText(finalResult, line);
-            if (task.onProgress) task.onProgress(line);
-          }
-        }
-      });
-
-      child.stderr?.on("data", (data: Buffer) => {
-        const text = data.toString();
-        if (!text.includes("no stdin data")) {
-          console.log(JSON.stringify({ type: "agent_stderr", data: text.slice(0, 500) }));
-          // Capture session ID from stderr (Claude prints it there)
-          const match = text.match(/session[_ ]id[:\s]+([0-9a-f-]{36})/i);
-          if (match && !task.sessionId && task.onSessionEstablished) {
-            task.onSessionEstablished(match[1]);
-          }
-        }
-      });
-
-      child.on("exit", (code) => {
-        // Process any remaining buffer
-        if (lineBuffer.trim()) {
-          try {
-            const event = JSON.parse(lineBuffer);
-            this.handleStreamEvent(event, task, {
-              appendResult: (text) => {
-                finalResult = appendDedupedText(finalResult, text);
-              },
-              sawTextDelta: () => {
-                sawClaudeTextDelta = true;
-              },
-              hasTextDelta: () => sawClaudeTextDelta,
-            });
-          } catch {
-            finalResult = appendDedupedText(finalResult, lineBuffer);
-          }
+        if (sessionId) {
+          args.push("--resume", sessionId);
         }
 
         console.log(JSON.stringify({
-          type: "agent_exit",
-          exit_code: code,
-          output_length: finalResult.length,
+          type: "agent_spawn",
+          provider: "claude",
+          model,
+          prompt_preview: task.prompt.slice(0, 100),
+          queue_remaining: this.queue.length,
+          resume: Boolean(sessionId),
         }));
 
-        if (finalResult.length > 0 || code === 0) {
-          task.onComplete(finalResult);
-        } else {
-          task.onError(new Error(`Agent exited with code ${code}`));
-        }
-        resolve();
-      });
+        const child = spawn("claude", args, {
+          cwd: this.workspacePath,
+          stdio: ["pipe", "pipe", "pipe"],
+          env: this.buildClaudeEnv(),
+        });
 
-      child.on("error", (err) => {
-        console.log(JSON.stringify({ type: "agent_error", error: err.message }));
-        task.onError(err);
-        resolve();
-      });
+        let finalResult = "";
+        let lineBuffer = "";
+        let sawClaudeTextDelta = false;
 
-      // Wall-clock timeout
-      const timeoutMs = this.config.engine.max_session_duration_minutes * 60 * 1000;
-      const timer = setTimeout(() => {
-        if (child.exitCode === null) {
-          console.log(JSON.stringify({ type: "agent_timeout", timeout_ms: timeoutMs }));
-          child.kill("SIGTERM");
-          setTimeout(() => {
-            if (child.exitCode === null) try { child.kill("SIGKILL"); } catch {}
-          }, 10000);
-        }
-      }, timeoutMs);
+        child.stdout?.on("data", (data: Buffer) => {
+          lineBuffer += data.toString();
+          const lines = lineBuffer.split("\n");
+          lineBuffer = lines.pop() || "";
 
-      child.on("exit", () => clearTimeout(timer));
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const event = JSON.parse(line);
+              const sid = (event as Record<string, unknown>).session_id as string | undefined;
+              if (sid && !sessionId && task.onSessionEstablished) {
+                task.onSessionEstablished(sid);
+              }
+              this.handleStreamEvent(event, task, {
+                appendResult: (text) => {
+                  finalResult = appendDedupedText(finalResult, text);
+                },
+                sawTextDelta: () => {
+                  sawClaudeTextDelta = true;
+                },
+                hasTextDelta: () => sawClaudeTextDelta,
+              });
+            } catch {
+              finalResult = appendDedupedText(finalResult, line);
+              task.onProgress?.(line);
+            }
+          }
+        });
+
+        child.stderr?.on("data", (data: Buffer) => {
+          const text = data.toString();
+          if (!text.includes("no stdin data")) {
+            console.log(JSON.stringify({ type: "agent_stderr", data: text.slice(0, 500) }));
+            const match = text.match(/session[_ ]id[:\s]+([0-9a-f-]{36})/i);
+            if (match && !sessionId && task.onSessionEstablished) {
+              task.onSessionEstablished(match[1]);
+            }
+          }
+        });
+
+        child.on("exit", (code) => {
+          if (lineBuffer.trim()) {
+            try {
+              const event = JSON.parse(lineBuffer);
+              this.handleStreamEvent(event, task, {
+                appendResult: (text) => {
+                  finalResult = appendDedupedText(finalResult, text);
+                },
+                sawTextDelta: () => {
+                  sawClaudeTextDelta = true;
+                },
+                hasTextDelta: () => sawClaudeTextDelta,
+              });
+            } catch {
+              finalResult = appendDedupedText(finalResult, lineBuffer);
+            }
+          }
+
+          console.log(JSON.stringify({
+            type: "agent_exit",
+            exit_code: code,
+            output_length: finalResult.length,
+          }));
+
+          if (sessionId && allowResumeFallback && finalResult.length === 0 && code !== 0) {
+            console.log(JSON.stringify({
+              type: "agent_resume_failed_retrying_fresh",
+              provider: "claude",
+            }));
+            attempt(null, false);
+            return;
+          }
+
+          if (finalResult.length > 0 || code === 0) {
+            task.onComplete(finalResult);
+          } else {
+            task.onError(new Error(`Agent exited with code ${code}`));
+          }
+          resolve();
+        });
+
+        child.on("error", (err) => {
+          console.log(JSON.stringify({ type: "agent_error", error: err.message }));
+          if (sessionId && allowResumeFallback) {
+            console.log(JSON.stringify({
+              type: "agent_resume_failed_retrying_fresh",
+              provider: "claude",
+              error: err.message,
+            }));
+            attempt(null, false);
+            return;
+          }
+          task.onError(err);
+          resolve();
+        });
+
+        const timeoutMs = this.config.engine.max_session_duration_minutes * 60 * 1000;
+        const timer = setTimeout(() => {
+          if (child.exitCode === null) {
+            console.log(JSON.stringify({ type: "agent_timeout", timeout_ms: timeoutMs }));
+            child.kill("SIGTERM");
+            setTimeout(() => {
+              if (child.exitCode === null) try { child.kill("SIGKILL"); } catch {}
+            }, 10000);
+          }
+        }, timeoutMs);
+
+        child.on("exit", () => clearTimeout(timer));
+      };
+
+      attempt(task.sessionId, true);
     });
   }
 
   private async runCodexTask(task: QueuedTask): Promise<void> {
     return new Promise<void>((resolve) => {
-      const model = process.env.CODEX_MODEL;
-      const args = task.sessionId
-        ? [
-            "exec",
-            "resume",
-            "--json",
-            "--dangerously-bypass-approvals-and-sandbox",
-            task.sessionId,
-          ]
-        : [
-            "exec",
-            "--json",
-            "--skip-git-repo-check",
-            "--dangerously-bypass-approvals-and-sandbox",
-            "-C", this.workspacePath,
-          ];
+      const attempt = (sessionId: string | null | undefined, allowResumeFallback: boolean): void => {
+        const model = process.env.CODEX_MODEL;
+        const args = sessionId
+          ? [
+              "exec",
+              "resume",
+              "--json",
+              "--dangerously-bypass-approvals-and-sandbox",
+              sessionId,
+            ]
+          : [
+              "exec",
+              "--json",
+              "--skip-git-repo-check",
+              "--dangerously-bypass-approvals-and-sandbox",
+              "-C", this.workspacePath,
+            ];
 
-      if (model) {
-        args.push("--model", model);
-      }
-
-      args.push(task.prompt);
-
-      console.log(JSON.stringify({
-        type: "agent_spawn",
-        provider: "codex",
-        model: model || "default",
-        prompt_preview: task.prompt.slice(0, 100),
-        queue_remaining: this.queue.length,
-      }));
-
-      const child = spawn("codex", args, {
-        cwd: this.workspacePath,
-        stdio: ["pipe", "pipe", "pipe"],
-        env: this.buildCodexEnv(),
-      });
-
-      let finalResult = "";
-      let stderrOutput = "";
-      let lineBuffer = "";
-
-      child.stdout?.on("data", (data: Buffer) => {
-        lineBuffer += data.toString();
-        const lines = lineBuffer.split("\n");
-        lineBuffer = lines.pop() || "";
-
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const event = JSON.parse(line) as Record<string, unknown>;
-            this.handleCodexEvent(event, task, (text) => { finalResult += text; });
-          } catch {
-            finalResult += line;
-            if (task.onProgress) task.onProgress(line);
-          }
+        if (model) {
+          args.push("--model", model);
         }
-      });
 
-      child.stderr?.on("data", (data: Buffer) => {
-        const text = data.toString();
-        stderrOutput += text;
-        console.log(JSON.stringify({ type: "agent_stderr", provider: "codex", data: text.slice(0, 500) }));
-      });
-
-      child.on("exit", (code) => {
-        if (lineBuffer.trim()) {
-          try {
-            const event = JSON.parse(lineBuffer) as Record<string, unknown>;
-            this.handleCodexEvent(event, task, (text) => { finalResult += text; });
-          } catch {
-            finalResult += lineBuffer;
-          }
-        }
+        args.push(task.prompt);
 
         console.log(JSON.stringify({
-          type: "agent_exit",
+          type: "agent_spawn",
           provider: "codex",
-          exit_code: code,
-          output_length: finalResult.length,
+          model: model || "default",
+          prompt_preview: task.prompt.slice(0, 100),
+          queue_remaining: this.queue.length,
+          resume: Boolean(sessionId),
         }));
 
-        if (finalResult.length > 0 || code === 0) {
-          task.onComplete(finalResult);
-        } else {
-          task.onError(new Error(this.humanizeCodexError(code, stderrOutput)));
-        }
-        resolve();
-      });
+        const child = spawn("codex", args, {
+          cwd: this.workspacePath,
+          stdio: ["pipe", "pipe", "pipe"],
+          env: this.buildCodexEnv(),
+        });
 
-      child.on("error", (err) => {
-        console.log(JSON.stringify({ type: "agent_error", provider: "codex", error: err.message }));
-        task.onError(err);
-        resolve();
-      });
+        let finalResult = "";
+        let stderrOutput = "";
+        let lineBuffer = "";
 
-      const timeoutMs = this.config.engine.max_session_duration_minutes * 60 * 1000;
-      const timer = setTimeout(() => {
-        if (child.exitCode === null) {
-          console.log(JSON.stringify({ type: "agent_timeout", provider: "codex", timeout_ms: timeoutMs }));
-          child.kill("SIGTERM");
-          setTimeout(() => {
-            if (child.exitCode === null) try { child.kill("SIGKILL"); } catch {}
-          }, 10000);
-        }
-      }, timeoutMs);
+        child.stdout?.on("data", (data: Buffer) => {
+          lineBuffer += data.toString();
+          const lines = lineBuffer.split("\n");
+          lineBuffer = lines.pop() || "";
 
-      child.on("exit", () => clearTimeout(timer));
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const event = JSON.parse(line) as Record<string, unknown>;
+              this.handleCodexEvent(event, task, (text) => { finalResult += text; });
+            } catch {
+              finalResult += line;
+              task.onProgress?.(line);
+            }
+          }
+        });
+
+        child.stderr?.on("data", (data: Buffer) => {
+          const text = data.toString();
+          stderrOutput += text;
+          console.log(JSON.stringify({ type: "agent_stderr", provider: "codex", data: text.slice(0, 500) }));
+        });
+
+        child.on("exit", (code) => {
+          if (lineBuffer.trim()) {
+            try {
+              const event = JSON.parse(lineBuffer) as Record<string, unknown>;
+              this.handleCodexEvent(event, task, (text) => { finalResult += text; });
+            } catch {
+              finalResult += lineBuffer;
+            }
+          }
+
+          console.log(JSON.stringify({
+            type: "agent_exit",
+            provider: "codex",
+            exit_code: code,
+            output_length: finalResult.length,
+          }));
+
+          if (sessionId && allowResumeFallback && finalResult.length === 0 && code !== 0) {
+            console.log(JSON.stringify({
+              type: "agent_resume_failed_retrying_fresh",
+              provider: "codex",
+            }));
+            attempt(null, false);
+            return;
+          }
+
+          if (finalResult.length > 0 || code === 0) {
+            task.onComplete(finalResult);
+          } else {
+            task.onError(new Error(this.humanizeCodexError(code, stderrOutput)));
+          }
+          resolve();
+        });
+
+        child.on("error", (err) => {
+          console.log(JSON.stringify({ type: "agent_error", provider: "codex", error: err.message }));
+          if (sessionId && allowResumeFallback) {
+            console.log(JSON.stringify({
+              type: "agent_resume_failed_retrying_fresh",
+              provider: "codex",
+              error: err.message,
+            }));
+            attempt(null, false);
+            return;
+          }
+          task.onError(err);
+          resolve();
+        });
+
+        const timeoutMs = this.config.engine.max_session_duration_minutes * 60 * 1000;
+        const timer = setTimeout(() => {
+          if (child.exitCode === null) {
+            console.log(JSON.stringify({ type: "agent_timeout", provider: "codex", timeout_ms: timeoutMs }));
+            child.kill("SIGTERM");
+            setTimeout(() => {
+              if (child.exitCode === null) try { child.kill("SIGKILL"); } catch {}
+            }, 10000);
+          }
+        }, timeoutMs);
+
+        child.on("exit", () => clearTimeout(timer));
+      };
+
+      attempt(task.sessionId, true);
     });
   }
 
