@@ -1,0 +1,42 @@
+name: citio
+version: 1
+
+slack:
+  bot_token: ${SLACK_BOT_TOKEN}
+  app_token: ${SLACK_APP_TOKEN}
+  channel_id: C0123456789
+  authorized_users: []
+  admin_users: []
+
+engine:
+  default_provider: claude
+  max_session_duration_minutes: 60
+  max_concurrent_sessions: 1
+  providers:
+    codex: {}
+    claude: {}
+
+skills:
+  installed: []
+  directory: /workspace/.citio/skills/
+
+workspace:
+  repos:
+    - url: https://github.com/example-org/example-repo.git
+      branch: main
+  rules:
+    - Always create PRs for code changes. Never push directly to main.
+    - When investigating bugs, check logs first before making code changes.
+    - Report findings back to the team with clear summaries.
+    - After any update or change pushed to a PR, always quote the PR link in your response.
+
+deploy:
+  provider: aws
+  aws:
+    region: eu-west-2
+    ecr_repo: citio
+    ecs_cluster: citio
+    ecs_service: citio
+    task_cpu: 2048
+    task_memory: 8192
+    ephemeral_storage_gb: 100

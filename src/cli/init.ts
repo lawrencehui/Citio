@@ -48,6 +48,39 @@ const SKILL_REGISTRY: Record<string, { url: string; description: string; install
   },
 };
 
+function runDeployCommand(command: string, errorMessage: string, options: { cwd?: string; timeout?: number; encoding?: BufferEncoding } = {}): string {
+  try {
+    return execSync(command, {
+      stdio: "pipe",
+      encoding: options.encoding || "utf-8",
+      cwd: options.cwd,
+      timeout: options.timeout,
+    });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    p.log.error(`${errorMessage}\n${detail}`);
+    process.exit(1);
+  }
+}
+
+function resolveEfsFileSystemId(region: string, profileFlag: string, createdEfsId: string): string {
+  if (createdEfsId) {
+    return createdEfsId;
+  }
+
+  const discovered = runDeployCommand(
+    `aws efs describe-file-systems --creation-token citio-memory --region ${region} ${profileFlag} --query 'FileSystems[0].FileSystemId' --output text`,
+    "Failed to resolve the Citio EFS filesystem. Re-run the installer with EFS enabled or create the filesystem first."
+  ).trim();
+
+  if (!discovered || discovered === "None" || discovered === "null") {
+    p.log.error("No Citio EFS filesystem was found for creation token `citio-memory`.");
+    process.exit(1);
+  }
+
+  return discovered;
+}
+
 function checkPrerequisites(): void {
   const missing: string[] = [];
 
@@ -428,6 +461,11 @@ async function collectConfig(): Promise<InitConfig> {
   })) as boolean;
   if (p.isCancel(enableEfs)) process.exit(0);
 
+  if (!enableEfs && provider === "codex" && authMethod === "oauth") {
+    p.log.error("Codex OAuth requires EFS so the container can persist ~/.codex/auth.json across restarts.");
+    process.exit(1);
+  }
+
   return {
     provider,
     authMethod,
@@ -595,27 +633,27 @@ async function deployToAws(config: InitConfig): Promise<void> {
 
   // 3. Build and push Docker image
   s.start("Building Docker image...");
-  execSync("npm run build", { stdio: "pipe", cwd: projectDir });
+  runDeployCommand("npm run build", "Failed to build the TypeScript application before Docker packaging.", { cwd: projectDir });
 
   // Auth is handled at RUNTIME via env vars in the ECS task definition,
   // never baked into the Docker image.
 
   // Build for linux/amd64 (ECS Fargate requires it, even if building on ARM Mac)
-  execSync("docker build --platform linux/amd64 -t citio:latest .", {
-    stdio: "pipe",
-    timeout: 600000,
-    cwd: projectDir,
-  });
+  runDeployCommand(
+    "docker build --platform linux/amd64 -t citio:latest .",
+    "Docker build failed for the linux/amd64 ECS image.",
+    { cwd: projectDir, timeout: 600000 }
+  );
 
   s.stop("Docker image built");
 
   s.start("Pushing to ECR...");
-  execSync(
+  runDeployCommand(
     `aws ecr get-login-password --region ${region} ${profileFlag} | docker login --username AWS --password-stdin ${accountId}.dkr.ecr.${region}.amazonaws.com`,
-    { stdio: "pipe" }
+    "Failed to log Docker into ECR."
   );
-  execSync(`docker tag citio:latest ${ecrUri}:latest`, { stdio: "pipe" });
-  execSync(`docker push ${ecrUri}:latest`, { stdio: "pipe", timeout: 600000 });
+  runDeployCommand(`docker tag citio:latest ${ecrUri}:latest`, "Failed to tag the Docker image for ECR.");
+  runDeployCommand(`docker push ${ecrUri}:latest`, "Failed to push the Docker image to ECR.", { timeout: 600000 });
   s.stop("Image pushed to ECR");
 
   // 4. Create ECS cluster
@@ -721,11 +759,15 @@ async function deployToAws(config: InitConfig): Promise<void> {
     // No CITIO_NEEDS_AUTH — container doesn't do interactive auth
   }
 
+  const efsFileSystemId = (config.enableEfs || config.authMethod === "oauth")
+    ? resolveEfsFileSystemId(region, profileFlag, efsId)
+    : "";
+
   const homeVolume = (config.enableEfs || config.authMethod === "oauth")
     ? {
         name: "citio-home",
         efsVolumeConfiguration: {
-          fileSystemId: efsId || "<EFS_ID>",
+          fileSystemId: efsFileSystemId,
           rootDirectory: "/",
           transitEncryption: "ENABLED",
         },
@@ -778,9 +820,9 @@ async function deployToAws(config: InitConfig): Promise<void> {
 
   const taskDefPath = "/tmp/citio-task-def.json";
   writeFileSync(taskDefPath, JSON.stringify(taskDef, null, 2));
-  execSync(
+  runDeployCommand(
     `aws ecs register-task-definition --cli-input-json file://${taskDefPath} --region ${region} ${profileFlag}`,
-    { stdio: "pipe" }
+    "Failed to register the ECS task definition."
   );
   s.stop("Task definition registered");
 
@@ -825,7 +867,7 @@ async function deployToAws(config: InitConfig): Promise<void> {
   // 9. Create/update ECS service
   s.start("Deploying ECS service...");
   try {
-    execSync(
+    runDeployCommand(
       `aws ecs create-service \
         --cluster citio \
         --service-name citio \
@@ -834,18 +876,18 @@ async function deployToAws(config: InitConfig): Promise<void> {
         --launch-type FARGATE \
         --network-configuration "awsvpcConfiguration={subnets=[${subnetId}],securityGroups=[${sgId}],assignPublicIp=ENABLED}" \
         --region ${region} ${profileFlag}`,
-      { stdio: "pipe" }
+      "Failed to create the ECS service."
     );
   } catch {
     // Service may already exist, update it
-    execSync(
+    runDeployCommand(
       `aws ecs update-service \
         --cluster citio \
         --service citio \
         --task-definition citio \
         --force-new-deployment \
         --region ${region} ${profileFlag}`,
-      { stdio: "pipe" }
+      "Failed to update the ECS service."
     );
   }
   s.stop("ECS service deployed!");
@@ -881,7 +923,7 @@ async function deployToAws(config: InitConfig): Promise<void> {
           cpu: "256", memory: "512",
           executionRoleArn: `arn:aws:iam::${accountId}:role/citio-task-execution`,
           taskRoleArn: `arn:aws:iam::${accountId}:role/citio-task-execution`,
-          volumes: [{ name: "citio-home", efsVolumeConfiguration: { fileSystemId: efsId || "<EFS_ID>", rootDirectory: "/", transitEncryption: "ENABLED" } }],
+          volumes: [{ name: "citio-home", efsVolumeConfiguration: { fileSystemId: efsFileSystemId, rootDirectory: "/", transitEncryption: "ENABLED" } }],
           containerDefinitions: [{ name: "auth-setup", image: "alpine:latest", essential: true,
             command: ["sh", "-c", uploadCommand],
             mountPoints: [{ sourceVolume: "citio-home", containerPath: "/efs", readOnly: false }],

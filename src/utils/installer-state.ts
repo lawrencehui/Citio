@@ -3,7 +3,7 @@ import path from "path";
 import { parse as parseDotenv } from "dotenv";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { getInstallerStatePath } from "./app-state.js";
-import { loadInstallerSecrets, saveInstallerSecrets, type InstallerSecrets } from "./secret-store.js";
+import { loadInstallerSecrets, saveInstallerSecrets, type InstallerSecrets, type SecretStore } from "./secret-store.js";
 
 export interface SavedInstallerState {
   provider?: "codex" | "claude";
@@ -22,6 +22,13 @@ export interface SavedInstallerState {
   openAiApiKey?: string;
   anthropicApiKey?: string;
   secretBackend: "keychain" | "file";
+}
+
+interface InstallerStateOptions {
+  statePath?: string;
+  localYamlPath?: string;
+  localEnvPath?: string;
+  secretStore?: SecretStore;
 }
 
 function asString(value: unknown): string | undefined {
@@ -72,29 +79,38 @@ function loadYamlState(filePath: string): Partial<SavedInstallerState> {
     const skills = parsed?.skills as Record<string, unknown> | undefined;
     const deploy = parsed?.deploy as Record<string, unknown> | undefined;
     const aws = deploy?.aws as Record<string, unknown> | undefined;
+    const repos = asRepoArray(parsed?.repos);
+    const workspaceRepos = asRepoArray(workspace?.repos);
+    const rules = asStringArray(parsed?.rules);
+    const workspaceRules = asStringArray(workspace?.rules);
+    const installedSkills = asStringArray(parsed?.skills);
+    const configSkills = asStringArray(skills?.installed);
 
     return {
-      provider: engine?.default_provider === "codex" || engine?.default_provider === "claude"
+      provider: parsed?.provider === "codex" || parsed?.provider === "claude"
+        ? parsed.provider
+        : engine?.default_provider === "codex" || engine?.default_provider === "claude"
         ? engine.default_provider
         : undefined,
-      authMethod: engine?.auth_method === "oauth" || engine?.auth_method === "api_key"
+      authMethod: parsed?.authMethod === "oauth" || parsed?.authMethod === "api_key"
+        ? parsed.authMethod
+        : engine?.auth_method === "oauth" || engine?.auth_method === "api_key"
         ? engine.auth_method
         : undefined,
-      slackChannelId: asString(slack?.channel_id),
-      repos: asRepoArray(workspace?.repos),
-      rules: asStringArray(workspace?.rules),
-      skills: asStringArray(skills?.installed),
-      awsRegion: asString(aws?.region),
-      awsProfile: asString(aws?.profile),
-      enableEfs: asBoolean(aws?.enable_efs),
+      slackChannelId: asString(parsed?.slackChannelId) || asString(slack?.channel_id),
+      repos: repos.length > 0 ? repos : workspaceRepos,
+      rules: rules.length > 0 ? rules : workspaceRules,
+      skills: installedSkills.length > 0 ? installedSkills : configSkills,
+      awsRegion: asString(parsed?.awsRegion) || asString(aws?.region),
+      awsProfile: asString(parsed?.awsProfile) || asString(aws?.profile),
+      enableEfs: asBoolean(parsed?.enableEfs) ?? asBoolean(aws?.enable_efs),
     };
   } catch {
     return {};
   }
 }
 
-function loadLocalEnvSecrets(cwd: string): InstallerSecrets {
-  const envPath = path.join(cwd, ".env");
+function loadLocalEnvSecrets(envPath: string): InstallerSecrets {
   if (!existsSync(envPath)) {
     return {};
   }
@@ -114,12 +130,18 @@ function loadLocalEnvSecrets(cwd: string): InstallerSecrets {
   }
 }
 
-export async function loadSavedInstallerState(cwd: string): Promise<SavedInstallerState> {
-  const statePath = getInstallerStatePath();
+export async function loadSavedInstallerState(cwd: string, options: InstallerStateOptions = {}): Promise<SavedInstallerState> {
+  const statePath = options.statePath || getInstallerStatePath();
+  const localYamlPath = options.localYamlPath || path.join(cwd, "citio.yaml");
+  const localEnvPath = options.localEnvPath || path.join(cwd, ".env");
+  const secretStore = options.secretStore || {
+    loadInstallerSecrets,
+    saveInstallerSecrets,
+  };
   const stateFromAppDir = loadYamlState(statePath);
-  const localYamlFallback = loadYamlState(path.join(cwd, "citio.yaml"));
-  const { secrets, backend } = await loadInstallerSecrets();
-  const localEnvFallback = loadLocalEnvSecrets(cwd);
+  const localYamlFallback = loadYamlState(localYamlPath);
+  const { secrets, backend } = await secretStore.loadInstallerSecrets();
+  const localEnvFallback = loadLocalEnvSecrets(localEnvPath);
 
   return {
     provider: stateFromAppDir.provider || localYamlFallback.provider,
@@ -143,9 +165,14 @@ export async function loadSavedInstallerState(cwd: string): Promise<SavedInstall
 
 export async function saveInstallerState(
   state: Omit<SavedInstallerState, "secretBackend" | keyof InstallerSecrets>,
-  secrets: InstallerSecrets
+  secrets: InstallerSecrets,
+  options: InstallerStateOptions = {}
 ): Promise<"keychain" | "file"> {
-  const statePath = getInstallerStatePath();
+  const statePath = options.statePath || getInstallerStatePath();
+  const secretStore = options.secretStore || {
+    loadInstallerSecrets,
+    saveInstallerSecrets,
+  };
   const yaml = stringifyYaml({
     provider: state.provider,
     authMethod: state.authMethod,
@@ -161,5 +188,5 @@ export async function saveInstallerState(
   writeFileSync(statePath, yaml, "utf-8");
   chmodSync(statePath, 0o600);
 
-  return saveInstallerSecrets(secrets);
+  return secretStore.saveInstallerSecrets(secrets);
 }

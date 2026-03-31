@@ -100,3 +100,8 @@ export async function saveInstallerSecrets(secrets: InstallerSecrets): Promise<"
   persistFallbackSecrets(secrets);
   return "file";
 }
+
+export interface SecretStore {
+  loadInstallerSecrets: typeof loadInstallerSecrets;
+  saveInstallerSecrets: typeof saveInstallerSecrets;
+}

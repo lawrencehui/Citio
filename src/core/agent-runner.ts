@@ -172,6 +172,7 @@ export class AgentRunner {
         let finalResult = "";
         let lineBuffer = "";
         let sawClaudeTextDelta = false;
+        let stderrOutput = "";
 
         child.stdout?.on("data", (data: Buffer) => {
           lineBuffer += data.toString();
@@ -204,6 +205,7 @@ export class AgentRunner {
 
         child.stderr?.on("data", (data: Buffer) => {
           const text = data.toString();
+          stderrOutput += text;
           if (!text.includes("no stdin data")) {
             console.log(JSON.stringify({ type: "agent_stderr", data: text.slice(0, 500) }));
             const match = text.match(/session[_ ]id[:\s]+([0-9a-f-]{36})/i);
@@ -249,7 +251,7 @@ export class AgentRunner {
           if (finalResult.length > 0 || code === 0) {
             task.onComplete(finalResult);
           } else {
-            task.onError(new Error(`Agent exited with code ${code}`));
+            task.onError(new Error(this.humanizeClaudeError(code, stderrOutput, Boolean(sessionId))));
           }
           resolve();
         });
@@ -517,6 +519,21 @@ export class AgentRunner {
     }
 
     return `Codex exited with code ${code}`;
+  }
+
+  private humanizeClaudeError(code: number | null, stderrOutput: string, usedResume: boolean): string {
+    const stderr = stderrOutput.trim();
+
+    if (stderr) {
+      const prefix = usedResume
+        ? "Claude could not resume the saved session and the follow-up attempt failed"
+        : `Claude exited with code ${code}`;
+      return `${prefix}: ${stderr}`;
+    }
+
+    return usedResume
+      ? "Claude could not resume the saved session and the follow-up attempt failed."
+      : `Claude exited with code ${code}`;
   }
 
   private buildClaudeEnv(): NodeJS.ProcessEnv {

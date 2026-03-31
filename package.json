@@ -1,6 +1,6 @@
 {
   "name": "citio",
-  "version": "1.0.0",
+  "version": "0.1.3",
   "main": "dist/index.js",
   "bin": {
     "citio": "./dist/cli/init.js"
@@ -10,7 +10,8 @@
     "build": "tsc && chmod +x dist/cli/init.js",
     "init": "tsx src/cli/init.ts",
     "start": "node dist/index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test test/**/*.test.ts"
   },
   "keywords": [],
   "author": "",
