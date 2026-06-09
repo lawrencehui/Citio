@@ -1,34 +1,53 @@
-# Citio
+<div align="center">
 
-**Self-hosted AI coding agents that live in your Slack.** Ask for real engineering work in a message — investigate a bug, dig through CloudWatch logs, fix code, open a PR — and Citio runs Claude Code or OpenAI Codex inside your own infrastructure to do it. Slack is the interface, a controlled MCP tool layer is the safety boundary, and every credential stays in your AWS account.
+# 🤖 Citio
 
-## Problem
+**Self-hosted AI coding agents that live in your Slack.**
 
-Most teams can already chat with an LLM. The harder problem is letting a team ask for real engineering work from Slack without handing a raw shell and a pile of credentials directly to the model.
+Ask for real engineering work in a message — investigate a bug, dig through CloudWatch logs, fix code, open a PR — and Citio runs **Claude Code** or **OpenAI Codex** inside your own infrastructure to do it. Slack is the interface, a controlled MCP tool layer is the safety boundary, and every credential stays in your AWS account.
 
-Citio exists for that gap:
+<br/>
 
-- Slack is the user interface.
-- Claude Code or Codex is the execution engine.
-- Citio owns the orchestration layer, MCP tools, session handling, repo setup, and AWS/GitHub access.
-- The result should be something that can investigate bugs, inspect logs, edit code, and open pull requests without requiring the CTO to sit in the middle of every request.
+[![Status](https://img.shields.io/badge/status-pre--1.0-orange.svg)](docs/KNOWN_LIMITATIONS.md)
+[![License: ISC](https://img.shields.io/badge/license-ISC-blue.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/node-%E2%89%A5%2022-339933.svg?logo=node.js&logoColor=white)](package.json)
+[![TypeScript](https://img.shields.io/badge/TypeScript-3178C6.svg?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Slack-native](https://img.shields.io/badge/Slack-native-4A154B.svg?logo=slack&logoColor=white)](#-how-it-works)
+[![Deploy: AWS ECS](https://img.shields.io/badge/deploy-AWS%20ECS%20Fargate-FF9900.svg?logo=amazonaws&logoColor=white)](#-quickstart)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-## What It Supports Today
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-supported-D97757.svg?logo=anthropic&logoColor=white)](https://docs.anthropic.com/en/docs/claude-code)
+[![OpenAI Codex](https://img.shields.io/badge/OpenAI%20Codex-supported-412991.svg?logo=openai&logoColor=white)](https://openai.com/codex/)
 
-### Providers
+[**Quickstart**](#-quickstart) · [**How it works**](#-how-it-works) · [**Configuration**](#-configuration) · [**Architecture**](docs/ARCHITECTURE.md) · [**Contributing**](CONTRIBUTING.md) · [**Security**](SECURITY.md)
 
-- Claude Code
-- OpenAI Codex
+</div>
 
-### Deploy Target
+---
 
-- AWS ECS / Fargate
-- AWS ECR
-- Optional AWS EFS for persistent workspace, memory, and provider auth state
+## ✨ Why Citio
 
-Citio is currently AWS-first. Multi-cloud support is not part of the current public release.
+Most teams can already chat with an LLM. The harder problem is letting a team ask for **real engineering work** from Slack without handing a raw shell and a pile of credentials directly to the model.
 
-## Architecture
+Citio closes that gap:
+
+- 💬 **Slack is the user interface** — DM the bot or `@mention` it in a channel.
+- 🧠 **Claude Code or Codex is the execution engine** — the provider CLI does the reasoning and planning.
+- 🛡️ **Citio is the control plane** — it owns orchestration, session handling, repo setup, AWS/GitHub access, and a controlled MCP tool layer so the agent never touches raw credentials.
+- 🏠 **Everything runs in your infra** — your container, your AWS account, your keys.
+
+The result is something that can investigate bugs, inspect logs, edit code, and open pull requests — without a human sitting in the middle of every request.
+
+## 🧩 Features
+
+- 🤝 **Bring your own agent** — Claude Code or OpenAI Codex, your subscription or API key.
+- 🧰 **Controlled MCP tools** — `investigate_codebase`, `read_file`, `write_file`, `create_branch`, `create_pr`, `run_command` (allowlisted), `check_ci_status`, `query_logs`, `recall_context`, and more.
+- 🔐 **Credential boundary** — the agent calls MCP tools; secrets live with Citio, not the model. Command execution is allowlisted and shell-metacharacter-rejected.
+- 🧵 **Slack-native** — DMs and channel mentions, streamed progress, redacted output.
+- 💾 **Persistent workspace & memory** — optional AWS EFS keeps repos, sessions, and provider auth across redeploys.
+- 🪄 **One-command installer** — interactive setup wires up Slack, GitHub, provider auth, and deploys to ECS.
+
+## 🏗️ How it works
 
 ```mermaid
 flowchart TD
@@ -44,24 +63,25 @@ flowchart TD
 
 Runtime shape:
 
-- Slack requests are normalized by the Slack adapter.
-- AgentRunner serializes work and manages provider sessions.
-- Claude/Codex connects to Citio MCP tools for codebase reads, writes, PR creation, log queries, and progress updates.
-- Workspace, memory, and auth can persist through EFS when enabled.
+1. A Slack request is normalized by the **Slack adapter**.
+2. **AgentRunner** serializes work and manages provider sessions (one active task per container).
+3. It spawns the **Claude Code / Codex CLI** as the agent, wired to Citio's **MCP server** via `--mcp-config`.
+4. The agent uses MCP tools for codebase reads/writes, PR creation, log queries, and progress updates — never raw credentials.
+5. Workspace, memory, and auth persist through **EFS** when enabled.
 
 More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
-## Quickstart
+## 🚀 Quickstart
 
-Prerequisites:
+**Prerequisites**
 
 - Docker
-- AWS CLI
+- AWS CLI (configured for your account)
 - Git
 - A Slack app with bot token and app token
-- A GitHub PAT with repo contents + pull request permissions
+- A GitHub PAT with repo `contents` + `pull_requests` permissions
 
-Install dependencies and run the interactive installer:
+**Install and run the interactive installer**
 
 ```bash
 npm ci
@@ -71,54 +91,98 @@ citio
 
 The installer will:
 
-- collect provider and auth settings
-- collect Slack and GitHub credentials
-- let you select repos
+- collect provider and auth settings (subscription OAuth first, API key as fallback)
+- collect Slack and GitHub credentials (stored in your OS keychain when available)
+- let you select which repos the agent can work on
 - write a local `citio.yaml`
-- deploy the image to ECS
+- build the image and deploy it to AWS ECS
 
-## Screenshots
+## ⚙️ Configuration
 
-This repo is ready for screenshots in the README, but screenshot assets are not committed yet. Recommended launch assets:
+The installer generates a local `citio.yaml`. The committed [`citio.example.yaml`](citio.example.yaml) shows the full shape:
 
-- Slack DM flow
-- Slack channel `@mention` flow
-- Installer flow
-- Opened PR created by Citio
-
-Suggested paths:
-
-- `docs/screenshots/slack-dm.png`
-- `docs/screenshots/slack-channel.png`
-- `docs/screenshots/installer.png`
-- `docs/screenshots/pr.png`
-
-## Status
-
-Citio should be treated as pre-1.0.
-
-- It is usable for AWS-first self-hosted experimentation.
-- It is not yet a hardened sandbox.
-- The current runtime model is one active agent task per container.
-
-Known caveats: [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md)
-
-## Development
-
-```bash
-npm run typecheck
-npm run build
-npm run test
+```yaml
+name: citio
+engine:
+  default_provider: claude        # or "codex"
+  max_concurrent_sessions: 1
+slack:
+  bot_token: ${SLACK_BOT_TOKEN}
+  app_token: ${SLACK_APP_TOKEN}
+  channel_id: C0123456789
+workspace:
+  repos:
+    - url: https://github.com/your-org/your-repo.git
+      branch: main
+  rules:
+    - Always create PRs for code changes. Never push directly to main.
+deploy:
+  provider: aws
+  aws:
+    region: eu-west-2
+    ecr_repo: citio                # AWS resource names are yours to choose
 ```
 
-## Contributing
+> ⚠️ `citio.yaml` holds local machine state (and is `.gitignore`d). Don't commit it.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+**Runtime environment variables**
 
-## Security
+| Variable             | Purpose                                          |
+| -------------------- | ------------------------------------------------ |
+| `CITIO_CONFIG`       | Path to the config file (default `citio.yaml`)   |
+| `CITIO_CONFIG_B64`   | Base64-encoded config (used by ECS, no file mount) |
+| `CITIO_WORKSPACE`    | Workspace path (default `/workspace`)            |
+| `CITIO_MEMORY`       | Memory/audit path (default `/memory`)            |
 
-See [SECURITY.md](SECURITY.md).
+## 🧱 Supported today
 
-## License
+| Area            | Support                                                        |
+| --------------- | ------------------------------------------------------------- |
+| **Providers**   | Claude Code, OpenAI Codex                                      |
+| **Deploy**      | AWS ECS / Fargate, AWS ECR                                     |
+| **Persistence** | Optional AWS EFS for workspace, memory, and provider auth      |
 
-ISC. See [LICENSE](LICENSE).
+Citio is currently **AWS-first**. Multi-cloud support is not part of the current public release.
+
+## 🧪 Development
+
+```bash
+npm run typecheck   # tsc --noEmit
+npm run build       # compile to dist/
+npm run test        # node:test suite
+npm run dev         # run locally with tsx
+```
+
+## 📸 Screenshots
+
+Screenshot assets aren't committed yet. Recommended launch assets:
+
+- Slack DM flow → `docs/screenshots/slack-dm.png`
+- Slack channel `@mention` flow → `docs/screenshots/slack-channel.png`
+- Installer flow → `docs/screenshots/installer.png`
+- A PR opened by Citio → `docs/screenshots/pr.png`
+
+## 🗺️ Status & roadmap
+
+Citio is **pre-1.0** — usable for AWS-first self-hosted experimentation.
+
+- ✅ Slack-native control plane for Claude Code / Codex
+- ✅ Controlled MCP tool layer with audit log
+- ✅ One-command ECS installer with optional EFS persistence
+- ⏳ Not yet a hardened sandbox (provider CLIs retain native shell inside the container)
+- ⏳ One active agent task per container
+- ⏳ Single-cloud (AWS) only
+
+Full caveats: [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md)
+
+## 🙌 Contributing
+
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Keep diffs small, prefer runtime-safe behavior over clever abstractions, and don't commit local machine state.
+
+## 🛡️ Security
+
+Found a vulnerability? Please report it privately — see [SECURITY.md](SECURITY.md). Don't open a public issue for credential handling, auth bypass, shell injection, or sandbox escape.
+
+## 📄 License
+
+[ISC](LICENSE)
