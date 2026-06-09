@@ -34,7 +34,7 @@ flowchart TD
 
 ### SlackAdapter
 
-File: [src/adapters/slack.ts](/Users/work/Dev/ai-dev/Citio/src/adapters/slack.ts)
+File: [src/adapters/slack.ts](../src/adapters/slack.ts)
 
 Responsibilities:
 
@@ -52,7 +52,7 @@ Current behavior:
 
 ### AgentRunner
 
-File: [src/core/agent-runner.ts](/Users/work/Dev/ai-dev/Citio/src/core/agent-runner.ts)
+File: [src/core/agent-runner.ts](../src/core/agent-runner.ts)
 
 Responsibilities:
 
@@ -72,7 +72,7 @@ Current behavior:
 
 ### SessionManager
 
-File: [src/core/session-manager.ts](/Users/work/Dev/ai-dev/Citio/src/core/session-manager.ts)
+File: [src/core/session-manager.ts](../src/core/session-manager.ts)
 
 Responsibilities:
 
@@ -87,7 +87,7 @@ Current behavior:
 
 ### MCP Server
 
-File: [src/core/mcp-entry.ts](/Users/work/Dev/ai-dev/Citio/src/core/mcp-entry.ts)
+File: [src/core/mcp-entry.ts](../src/core/mcp-entry.ts)
 
 Citio is primarily an MCP server. The provider CLI acts as the MCP client.
 
@@ -110,7 +110,7 @@ These tools are the main control-plane interface for repo work, PR creation, log
 
 ### WorkspaceManager
 
-File: [src/core/workspace.ts](/Users/work/Dev/ai-dev/Citio/src/core/workspace.ts)
+File: [src/core/workspace.ts](../src/core/workspace.ts)
 
 Responsibilities:
 
@@ -149,7 +149,7 @@ Memory stores:
 
 ## AWS Deployment Model
 
-Installer file: [src/cli/init.ts](/Users/work/Dev/ai-dev/Citio/src/cli/init.ts)
+Installer file: [src/cli/init.ts](../src/cli/init.ts)
 
 Current supported deployment target:
 
@@ -175,7 +175,7 @@ Installer state files:
 - non-secret config stored in app state
 - secrets stored in OS keychain when available, with a file fallback
 - local generated `citio.yaml` kept for deploy convenience
-- committed repo template lives in [citio.example.yaml](/Users/work/Dev/ai-dev/Citio/citio.example.yaml)
+- committed repo template lives in [citio.example.yaml](../citio.example.yaml)
 
 ## Current Limits
 
@@ -186,4 +186,4 @@ Citio is not yet:
 - multi-agent per container
 - a fully provider-agnostic MCP runtime with identical behavior across CLIs
 
-For current operational caveats, see [docs/KNOWN_LIMITATIONS.md](/Users/work/Dev/ai-dev/Citio/docs/KNOWN_LIMITATIONS.md).
+For current operational caveats, see [docs/KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md).

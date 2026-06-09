@@ -57,4 +57,4 @@ A good PR for Citio should include:
 
 ## Release Notes
 
-For release process details, see [docs/RELEASING.md](/Users/work/Dev/ai-dev/Citio/docs/RELEASING.md).
+For release process details, see [docs/RELEASING.md](docs/RELEASING.md).

@@ -27,6 +27,8 @@ test("CitioConfigSchema applies expected runtime defaults", () => {
   assert.equal(parsed.engine.max_concurrent_sessions, 1);
   assert.equal(parsed.skills.directory, "/workspace/.citio/skills/");
   assert.equal(parsed.workspace.repos[0]?.branch, "main");
+  assert.equal(parsed.workspace.git.user_name, "Citio");
+  assert.equal(parsed.workspace.git.user_email, undefined);
 });
 
 test("CitioConfigSchema keeps AWS deploy defaults stable", () => {

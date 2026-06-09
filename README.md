@@ -49,7 +49,7 @@ Runtime shape:
 - Claude/Codex connects to Citio MCP tools for codebase reads, writes, PR creation, log queries, and progress updates.
 - Workspace, memory, and auth can persist through EFS when enabled.
 
-More detail: [docs/ARCHITECTURE.md](/Users/work/Dev/ai-dev/Citio/docs/ARCHITECTURE.md)
+More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 ## Quickstart
 
@@ -101,7 +101,7 @@ Citio should be treated as pre-1.0.
 - It is not yet a hardened sandbox.
 - The current runtime model is one active agent task per container.
 
-Known caveats: [docs/KNOWN_LIMITATIONS.md](/Users/work/Dev/ai-dev/Citio/docs/KNOWN_LIMITATIONS.md)
+Known caveats: [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md)
 
 ## Development
 
@@ -113,12 +113,12 @@ npm run test
 
 ## Contributing
 
-See [CONTRIBUTING.md](/Users/work/Dev/ai-dev/Citio/CONTRIBUTING.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Security
 
-See [SECURITY.md](/Users/work/Dev/ai-dev/Citio/SECURITY.md).
+See [SECURITY.md](SECURITY.md).
 
 ## License
 
-ISC. See [LICENSE](/Users/work/Dev/ai-dev/Citio/LICENSE).
+ISC. See [LICENSE](LICENSE).

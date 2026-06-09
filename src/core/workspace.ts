@@ -1,4 +1,4 @@
-import { execSync } from "child_process";
+import { execFileSync, execSync } from "child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "fs";
 import path from "path";
 import type { CitioConfig } from "../config/schema.js";
@@ -19,14 +19,39 @@ export class WorkspaceManager {
   async initialize(): Promise<void> {
     mkdirSync(this.workspacePath, { recursive: true });
 
+    try {
+      execFileSync("git", ["config", "--global", "user.name", this.config.workspace.git.user_name], {
+        stdio: "pipe",
+        encoding: "utf-8",
+      });
+
+      if (this.config.workspace.git.user_email) {
+        execFileSync("git", ["config", "--global", "user.email", this.config.workspace.git.user_email], {
+          stdio: "pipe",
+          encoding: "utf-8",
+        });
+      }
+
+      console.log(JSON.stringify({
+        type: "git_identity_configured",
+        userName: this.config.workspace.git.user_name,
+        userEmail: this.config.workspace.git.user_email || null,
+      }));
+    } catch (err) {
+      console.log(JSON.stringify({
+        type: "git_identity_configuration_failed",
+        error: err instanceof Error ? err.message : String(err),
+      }));
+    }
+
     // Configure git to use GH_TOKEN for HTTPS clones
     const ghToken = process.env.GH_TOKEN;
     if (ghToken) {
       try {
-        execSync(
-          `git config --global credential.helper '!f() { echo "username=oauth2"; echo "password=${ghToken}"; }; f'`,
-          { stdio: "pipe" }
-        );
+        execFileSync("git", ["config", "--global", "credential.helper", `!f() { echo "username=oauth2"; echo "password=${ghToken}"; }; f`], {
+          stdio: "pipe",
+          encoding: "utf-8",
+        });
         console.log(JSON.stringify({ type: "git_credential_configured" }));
       } catch {
         // Non-fatal, try URL injection as fallback

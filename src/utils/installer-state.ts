@@ -15,6 +15,7 @@ export interface SavedInstallerState {
   repos: Array<{ url: string; branch: string }>;
   rules: string[];
   skills: string[];
+  gitUserEmail?: string;
   awsRegion?: string;
   awsProfile?: string;
   enableEfs?: boolean;
@@ -79,6 +80,7 @@ function loadYamlState(filePath: string): Partial<SavedInstallerState> {
     const skills = parsed?.skills as Record<string, unknown> | undefined;
     const deploy = parsed?.deploy as Record<string, unknown> | undefined;
     const aws = deploy?.aws as Record<string, unknown> | undefined;
+    const git = workspace?.git as Record<string, unknown> | undefined;
     const repos = asRepoArray(parsed?.repos);
     const workspaceRepos = asRepoArray(workspace?.repos);
     const rules = asStringArray(parsed?.rules);
@@ -101,6 +103,7 @@ function loadYamlState(filePath: string): Partial<SavedInstallerState> {
       repos: repos.length > 0 ? repos : workspaceRepos,
       rules: rules.length > 0 ? rules : workspaceRules,
       skills: installedSkills.length > 0 ? installedSkills : configSkills,
+      gitUserEmail: asString(parsed?.gitUserEmail) || asString(git?.user_email),
       awsRegion: asString(parsed?.awsRegion) || asString(aws?.region),
       awsProfile: asString(parsed?.awsProfile) || asString(aws?.profile),
       enableEfs: asBoolean(parsed?.enableEfs) ?? asBoolean(aws?.enable_efs),
@@ -150,6 +153,7 @@ export async function loadSavedInstallerState(cwd: string, options: InstallerSta
     repos: stateFromAppDir.repos?.length ? stateFromAppDir.repos : (localYamlFallback.repos || []),
     rules: stateFromAppDir.rules?.length ? stateFromAppDir.rules : (localYamlFallback.rules || []),
     skills: stateFromAppDir.skills?.length ? stateFromAppDir.skills : (localYamlFallback.skills || []),
+    gitUserEmail: stateFromAppDir.gitUserEmail || localYamlFallback.gitUserEmail,
     awsRegion: stateFromAppDir.awsRegion || localYamlFallback.awsRegion,
     awsProfile: stateFromAppDir.awsProfile || localYamlFallback.awsProfile,
     enableEfs: stateFromAppDir.enableEfs ?? localYamlFallback.enableEfs,
@@ -180,6 +184,7 @@ export async function saveInstallerState(
     repos: state.repos,
     rules: state.rules,
     skills: state.skills,
+    gitUserEmail: state.gitUserEmail,
     awsRegion: state.awsRegion,
     awsProfile: state.awsProfile,
     enableEfs: state.enableEfs,

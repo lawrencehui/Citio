@@ -41,6 +41,10 @@ export const CitioConfigSchema = z.object({
       })
     ),
     rules: z.array(z.string()).default([]),
+    git: z.object({
+      user_name: z.string().default("Citio"),
+      user_email: z.string().optional(),
+    }).default({ user_name: "Citio" }),
   }),
 
   deploy: z

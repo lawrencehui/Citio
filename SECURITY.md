@@ -36,4 +36,4 @@ Citio is improving, but it is not yet a hardened sandbox:
 - AWS is the only supported deployment target
 - the installer stores secrets in the OS keychain when available, with a file fallback when keychain access is unavailable
 
-See [docs/KNOWN_LIMITATIONS.md](/Users/work/Dev/ai-dev/Citio/docs/KNOWN_LIMITATIONS.md) for the current limitations before deploying Citio in a sensitive environment.
+See [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md) for the current limitations before deploying Citio in a sensitive environment.

@@ -39,6 +39,7 @@ test("loadSavedInstallerState prefers app-state config and secret store values",
     "provider: claude",
     "authMethod: oauth",
     "slackChannelId: CAPPDIR",
+    "gitUserEmail: you@example.com",
     "awsRegion: eu-west-2",
     "repos:",
     "  - url: https://github.com/example/app.git",
@@ -72,6 +73,7 @@ test("loadSavedInstallerState prefers app-state config and secret store values",
   assert.equal(loaded.provider, "claude");
   assert.equal(loaded.authMethod, "oauth");
   assert.equal(loaded.slackChannelId, "CAPPDIR");
+  assert.equal(loaded.gitUserEmail, "you@example.com");
   assert.equal(loaded.repos[0]?.url, "https://github.com/example/app.git");
   assert.equal(loaded.slackBotToken, "xoxb-from-store");
   assert.equal(loaded.githubToken, "ghp-from-store");
@@ -90,6 +92,7 @@ test("saveInstallerState writes non-secret config separately from secrets", asyn
       repos: [{ url: "https://github.com/example/repo.git", branch: "main" }],
       rules: ["Always create PRs."],
       skills: ["gstack"],
+      gitUserEmail: "you@example.com",
       awsRegion: "eu-west-2",
       awsProfile: "default",
       enableEfs: true,
@@ -108,6 +111,7 @@ test("saveInstallerState writes non-secret config separately from secrets", asyn
   const savedYaml = fs.readFileSync(statePath, "utf-8");
   assert.match(savedYaml, /slackChannelId: C1234567890/);
   assert.match(savedYaml, /provider: claude/);
+  assert.match(savedYaml, /gitUserEmail: you@example.com/);
   assert.ok(secretStore.savedSecrets);
   assert.equal(secretStore.savedSecrets?.slackBotToken, "xoxb-secret");
   assert.equal(secretStore.savedSecrets?.slackAppToken, "xapp-secret");

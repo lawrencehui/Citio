@@ -7,6 +7,13 @@ import os from "os";
 import { stringify } from "yaml";
 import { extractClaudeOauthTokenFromTranscript, normalizeClaudeOauthToken, validateClaudeOauthToken } from "../utils/claude.js";
 import { loadSavedInstallerState, saveInstallerState } from "../utils/installer-state.js";
+import {
+  createCitioSlackApp,
+  openBrowser,
+  validateSlackAppToken,
+  validateSlackBotToken,
+  validateSlackConfigToken,
+} from "../utils/slack-onboarding.js";
 
 interface InitConfig {
   provider: "codex" | "claude";
@@ -20,6 +27,7 @@ interface InitConfig {
   repos: Array<{ url: string; branch: string }>;
   rules: string[];
   skills: string[];
+  gitUserEmail: string;
   awsRegion: string;
   awsProfile: string;
   enableEfs: boolean;
@@ -61,6 +69,10 @@ function runDeployCommand(command: string, errorMessage: string, options: { cwd?
     p.log.error(`${errorMessage}\n${detail}`);
     process.exit(1);
   }
+}
+
+function sleep(seconds: number): void {
+  execSync(`sleep ${seconds}`, { stdio: "pipe" });
 }
 
 function resolveEfsFileSystemId(region: string, profileFlag: string, createdEfsId: string): string {
@@ -188,6 +200,129 @@ async function reuseOrPromptSecret(options: {
   return value;
 }
 
+async function promptSlackTokensManually(savedState: Awaited<ReturnType<typeof loadSavedInstallerState>>): Promise<{ slackBotToken: string; slackAppToken: string }> {
+  p.log.info(
+    "Manual Slack setup:\n" +
+    "1. Create or open your app at https://api.slack.com/apps\n" +
+    "2. Enable Socket Mode\n" +
+    "3. Install the app to your workspace\n" +
+    "4. Copy the Bot Token (xoxb-...) and App Token (xapp-...)"
+  );
+
+  const slackBotToken = await reuseOrPromptSecret({
+    message: "Slack Bot Token (xoxb-...):",
+    existingValue: savedState.slackBotToken,
+    validate: validateSlackBotToken,
+  });
+
+  const slackAppToken = await reuseOrPromptSecret({
+    message: "Slack App Token (xapp-...):",
+    existingValue: savedState.slackAppToken,
+    validate: validateSlackAppToken,
+  });
+
+  return { slackBotToken, slackAppToken };
+}
+
+async function collectSlackTokens(savedState: Awaited<ReturnType<typeof loadSavedInstallerState>>): Promise<{ slackBotToken: string; slackAppToken: string }> {
+  const hasSavedTokens = Boolean(savedState.slackBotToken && savedState.slackAppToken);
+
+  const setupMode = (await p.select({
+    message: "How should Slack be configured?",
+    initialValue: hasSavedTokens ? "reuse" : "automatic",
+    options: [
+      ...(hasSavedTokens ? [{
+        value: "reuse",
+        label: "Reuse saved Slack tokens",
+        hint: "Keep the previously saved bot and app tokens",
+      }] : []),
+      {
+        value: "automatic",
+        label: "Automatic app setup (recommended)",
+        hint: "Create the Slack app and scopes from a config token",
+      },
+      {
+        value: "manual",
+        label: "Manual token entry",
+        hint: "Paste xoxb and xapp tokens yourself",
+      },
+    ],
+  })) as "reuse" | "automatic" | "manual";
+
+  if (p.isCancel(setupMode)) process.exit(0);
+
+  if (setupMode === "reuse") {
+    return {
+      slackBotToken: savedState.slackBotToken!,
+      slackAppToken: savedState.slackAppToken!,
+    };
+  }
+
+  if (setupMode === "manual") {
+    return promptSlackTokensManually(savedState);
+  }
+
+  p.log.info(
+    "Slack setup takes about 2 minutes.\n" +
+    "Citio will create the app and configure the required scopes for you.\n" +
+    "You will still need to finish two browser steps:\n" +
+    "1. Approve the app install in Slack\n" +
+    "2. Create one Socket Mode app token (xapp-...)"
+  );
+
+  const configToken = await reuseOrPromptSecret({
+    message: "Slack config token (xoxe...):",
+    validate: validateSlackConfigToken,
+  });
+
+  const spinner = p.spinner();
+  spinner.start("Creating the Slack app via manifest...");
+
+  let slackApp: Awaited<ReturnType<typeof createCitioSlackApp>>;
+  try {
+    slackApp = await createCitioSlackApp(configToken, { appName: "Citio" });
+  } catch (error) {
+    spinner.stop("Slack app creation failed.");
+    p.log.error(error instanceof Error ? error.message : String(error));
+    const fallback = (await p.confirm({
+      message: "Slack app automation failed. Fall back to manual token entry?",
+      initialValue: true,
+    })) as boolean;
+    if (p.isCancel(fallback)) process.exit(0);
+    if (!fallback) {
+      process.exit(1);
+    }
+    return promptSlackTokensManually(savedState);
+  }
+
+  spinner.stop(`Created Slack app ${slackApp.appId}.`);
+
+  const openedAuthUrl = openBrowser(slackApp.oauthAuthorizeUrl);
+  const openedSettingsUrl = openBrowser(slackApp.settingsUrl);
+
+  p.log.info(
+    "Browser guide:\n" +
+    `• Approve the Slack install${openedAuthUrl ? " in the browser window that just opened" : ` at ${slackApp.oauthAuthorizeUrl}`}\n` +
+    `• Open the app settings${openedSettingsUrl ? " window" : ` at ${slackApp.settingsUrl}`}\n` +
+    "• In OAuth & Permissions, copy the Bot User OAuth Token (xoxb-...)\n" +
+    "• In Basic Information, create an App-Level Token with the connections:write scope, then copy the xapp-... token"
+  );
+
+  const slackBotToken = await reuseOrPromptSecret({
+    message: "Slack Bot Token (xoxb-...) from OAuth & Permissions:",
+    existingValue: savedState.slackBotToken,
+    validate: validateSlackBotToken,
+  });
+
+  const slackAppToken = await reuseOrPromptSecret({
+    message: "Slack App Token (xapp-...) from Basic Information:",
+    existingValue: savedState.slackAppToken,
+    validate: validateSlackAppToken,
+  });
+
+  return { slackBotToken, slackAppToken };
+}
+
 async function collectConfig(): Promise<InitConfig> {
   const savedState = await loadSavedInstallerState(process.cwd());
   const hasSavedState = Boolean(
@@ -296,19 +431,7 @@ async function collectConfig(): Promise<InitConfig> {
   }
 
   // Slack setup
-  p.log.info(
-    "Create a Slack app at https://api.slack.com/apps with Socket Mode enabled.\nYou need: Bot Token (xoxb-...) and App Token (xapp-...)."
-  );
-
-  const slackBotToken = await reuseOrPromptSecret({
-    message: "Slack Bot Token (xoxb-...):",
-    existingValue: savedState.slackBotToken,
-  });
-
-  const slackAppToken = await reuseOrPromptSecret({
-    message: "Slack App Token (xapp-...):",
-    existingValue: savedState.slackAppToken,
-  });
+  const { slackBotToken, slackAppToken } = await collectSlackTokens(savedState);
 
   const slackChannelId = (await p.text({
     message: savedState.slackChannelId
@@ -418,6 +541,16 @@ async function collectConfig(): Promise<InitConfig> {
   })) as string[];
   if (p.isCancel(skillChoices)) process.exit(0);
 
+  const gitUserEmail = (await p.text({
+    message: savedState.gitUserEmail
+      ? "Git commit email override (press Enter to keep saved value, leave blank to skip):"
+      : "Git commit email override (optional, leave blank to skip):",
+    placeholder: "you@example.com",
+    defaultValue: savedState.gitUserEmail,
+    initialValue: savedState.gitUserEmail,
+  })) as string;
+  if (p.isCancel(gitUserEmail)) process.exit(0);
+
   // AWS config
   const awsRegion = (await p.text({
     message: savedState.awsRegion
@@ -478,6 +611,7 @@ async function collectConfig(): Promise<InitConfig> {
     repos,
     rules,
     skills: skillChoices,
+    gitUserEmail: gitUserEmail.trim(),
     awsRegion,
     awsProfile,
     enableEfs,
@@ -517,6 +651,10 @@ function buildYamlConfig(config: InitConfig): Record<string, unknown> {
     workspace: {
       repos: config.repos,
       rules: config.rules,
+      git: {
+        user_name: "Citio",
+        ...(config.gitUserEmail ? { user_email: config.gitUserEmail } : {}),
+      },
     },
     deploy: {
       provider: "aws",
@@ -532,6 +670,137 @@ function buildYamlConfig(config: InitConfig): Record<string, unknown> {
         ephemeral_storage_gb: 100,
       },
     },
+  };
+}
+
+function getServiceNetworkConfig(region: string, profileFlag: string): { subnetId: string; securityGroupId: string } {
+  const subnetId = execSync(
+    `aws ecs describe-services --cluster citio --services citio --region ${region} ${profileFlag} --query 'services[0].networkConfiguration.awsvpcConfiguration.subnets[0]' --output text`,
+    { encoding: "utf-8", stdio: "pipe" }
+  ).trim();
+  const securityGroupId = execSync(
+    `aws ecs describe-services --cluster citio --services citio --region ${region} ${profileFlag} --query 'services[0].networkConfiguration.awsvpcConfiguration.securityGroups[0]' --output text`,
+    { encoding: "utf-8", stdio: "pipe" }
+  ).trim();
+
+  return { subnetId, securityGroupId };
+}
+
+function waitForTaskStop(taskArn: string, region: string, profileFlag: string, maxAttempts: number, intervalSeconds: number): { exitCode: string; taskId: string } {
+  const taskId = taskArn.split("/").pop() || taskArn;
+
+  for (let i = 0; i < maxAttempts; i++) {
+    sleep(intervalSeconds);
+    const status = execSync(
+      `aws ecs describe-tasks --cluster citio --tasks "${taskArn}" --region ${region} ${profileFlag} --query 'tasks[0].lastStatus' --output text`,
+      { encoding: "utf-8", stdio: "pipe" }
+    ).trim();
+
+    if (status === "STOPPED") {
+      const exitCode = execSync(
+        `aws ecs describe-tasks --cluster citio --tasks "${taskArn}" --region ${region} ${profileFlag} --query 'tasks[0].containers[0].exitCode' --output text`,
+        { encoding: "utf-8", stdio: "pipe" }
+      ).trim();
+      return { exitCode, taskId };
+    }
+  }
+
+  return { exitCode: "", taskId };
+}
+
+function printNewCloudWatchLines(logGroup: string, logStream: string, region: string, profileFlag: string, seen: Set<string>): void {
+  try {
+    const output = execSync(
+      `aws logs get-log-events --log-group-name ${logGroup} --log-stream-name ${logStream} --region ${region} ${profileFlag} --limit 50 --query 'events[].message' --output text`,
+      { encoding: "utf-8", stdio: "pipe", timeout: 15000 }
+    ).trim();
+
+    if (!output) {
+      return;
+    }
+
+    for (const message of output.split("\t")) {
+      const trimmed = message.trim();
+      if (!trimmed || seen.has(trimmed)) {
+        continue;
+      }
+      seen.add(trimmed);
+      p.log.info(trimmed);
+    }
+  } catch {
+    // Best effort only while the task is starting up.
+  }
+}
+
+function startCodexAuthSetupTask(params: {
+  accountId: string;
+  ecrUri: string;
+  region: string;
+  profileFlag: string;
+  efsFileSystemId: string;
+  subnetId: string;
+  securityGroupId: string;
+  mode: "upload_local_auth" | "device_auth";
+  localAuthJson?: string;
+}): { taskArn: string; taskId: string; logStream: string } {
+  const containerName = params.mode === "device_auth" ? "codex-auth" : "auth-setup";
+  const command = params.mode === "device_auth"
+    ? "mkdir -p /home/citio/.codex && codex login --device-auth"
+    : `mkdir -p /home/citio/.codex && echo '${Buffer.from(params.localAuthJson || "", "utf-8").toString("base64")}' | base64 -d > /home/citio/.codex/auth.json && chmod 600 /home/citio/.codex/auth.json && echo AUTH_OK`;
+
+  const taskDef = JSON.stringify({
+    family: params.mode === "device_auth" ? "citio-codex-auth" : "citio-auth-setup",
+    networkMode: "awsvpc",
+    requiresCompatibilities: ["FARGATE"],
+    cpu: "512",
+    memory: "1024",
+    executionRoleArn: `arn:aws:iam::${params.accountId}:role/citio-task-execution`,
+    taskRoleArn: `arn:aws:iam::${params.accountId}:role/citio-task-execution`,
+    volumes: [{
+      name: "citio-home",
+      efsVolumeConfiguration: {
+        fileSystemId: params.efsFileSystemId,
+        rootDirectory: "/",
+        transitEncryption: "ENABLED",
+      },
+    }],
+    containerDefinitions: [{
+      name: containerName,
+      image: params.mode === "device_auth" ? `${params.ecrUri}:latest` : "alpine:latest",
+      essential: true,
+      entryPoint: params.mode === "device_auth" ? ["sh", "-lc"] : undefined,
+      command: params.mode === "device_auth" ? [command] : ["sh", "-c", command],
+      environment: [
+        { name: "HOME", value: "/home/citio" },
+      ],
+      mountPoints: [{ sourceVolume: "citio-home", containerPath: "/home/citio", readOnly: false }],
+      logConfiguration: {
+        logDriver: "awslogs",
+        options: {
+          "awslogs-group": "/ecs/citio",
+          "awslogs-region": params.region,
+          "awslogs-stream-prefix": "auth-setup",
+          "awslogs-create-group": "true",
+        },
+      },
+    }],
+  });
+
+  writeFileSync("/tmp/citio-auth-task.json", taskDef);
+  const revision = execSync(
+    `aws ecs register-task-definition --cli-input-json file:///tmp/citio-auth-task.json --region ${params.region} ${params.profileFlag} --query 'taskDefinition.revision' --output text`,
+    { encoding: "utf-8", stdio: "pipe" }
+  ).trim();
+  const taskArn = execSync(
+    `aws ecs run-task --cluster citio --task-definition "${params.mode === "device_auth" ? "citio-codex-auth" : "citio-auth-setup"}:${revision}" --launch-type FARGATE --network-configuration "awsvpcConfiguration={subnets=[${params.subnetId}],securityGroups=[${params.securityGroupId}],assignPublicIp=ENABLED}" --region ${params.region} ${params.profileFlag} --query 'tasks[0].taskArn' --output text`,
+    { encoding: "utf-8", stdio: "pipe" }
+  ).trim();
+
+  const taskId = taskArn.split("/").pop() || taskArn;
+  return {
+    taskArn,
+    taskId,
+    logStream: `auth-setup/${containerName}/${taskId}`,
   };
 }
 
@@ -894,64 +1163,103 @@ async function deployToAws(config: InitConfig): Promise<void> {
 
   p.log.success("ECS service deployed!");
 
-  // Post-deploy: upload local OAuth credentials to EFS via one-off task for Codex only.
-  // Claude OAuth uses CLAUDE_CODE_OAUTH_TOKEN in the task environment.
+  // Post-deploy: seed Codex OAuth on EFS so the running container can refresh it from there.
   if (config.authMethod === "oauth" && config.provider === "codex") {
     const homeDir = process.env.HOME || "";
-    const hasLocalAuth = existsSync(`${homeDir}/.codex/auth.json`);
+    const localAuthPath = `${homeDir}/.codex/auth.json`;
+    const hasLocalAuth = existsSync(localAuthPath);
+    const setupMode = hasLocalAuth
+      ? (await p.select({
+          message: "How should Codex OAuth be bootstrapped on ECS?",
+          options: [
+            {
+              value: "upload_local_auth",
+              label: "Reuse local Codex login (recommended)",
+              hint: "Uploads ~/.codex/auth.json to EFS so ECS can refresh it there",
+            },
+            {
+              value: "device_auth",
+              label: "Authenticate inside ECS with device auth",
+              hint: "No local auth copy; complete the OpenAI device flow from the task logs",
+            },
+          ],
+          initialValue: "upload_local_auth",
+        })) as "upload_local_auth" | "device_auth"
+      : "device_auth";
 
-    if (hasLocalAuth) {
-      s.start("Uploading credentials to EFS...");
-      try {
-        const svcSubnet = execSync(
-          `aws ecs describe-services --cluster citio --services citio --region ${region} ${profileFlag} --query 'services[0].networkConfiguration.awsvpcConfiguration.subnets[0]' --output text`,
-          { encoding: "utf-8", stdio: "pipe" }
-        ).trim();
-        const svcSg = execSync(
-          `aws ecs describe-services --cluster citio --services citio --region ${region} ${profileFlag} --query 'services[0].networkConfiguration.awsvpcConfiguration.securityGroups[0]' --output text`,
-          { encoding: "utf-8", stdio: "pipe" }
-        ).trim();
+    if (p.isCancel(setupMode)) process.exit(0);
 
-        let authB64: string;
-        const uploadCommand = "mkdir -p /efs/.codex && echo '" +
-          Buffer.from(readFileSync(`${homeDir}/.codex/auth.json`, "utf-8")).toString("base64") +
-          "' | base64 -d > /efs/.codex/auth.json && chmod 600 /efs/.codex/auth.json && echo AUTH_OK";
-        const efsTaskDef = JSON.stringify({
-          family: "citio-auth-setup",
-          networkMode: "awsvpc",
-          requiresCompatibilities: ["FARGATE"],
-          cpu: "256", memory: "512",
-          executionRoleArn: `arn:aws:iam::${accountId}:role/citio-task-execution`,
-          taskRoleArn: `arn:aws:iam::${accountId}:role/citio-task-execution`,
-          volumes: [{ name: "citio-home", efsVolumeConfiguration: { fileSystemId: efsFileSystemId, rootDirectory: "/", transitEncryption: "ENABLED" } }],
-          containerDefinitions: [{ name: "auth-setup", image: "alpine:latest", essential: true,
-            command: ["sh", "-c", uploadCommand],
-            mountPoints: [{ sourceVolume: "citio-home", containerPath: "/efs", readOnly: false }],
-            logConfiguration: { logDriver: "awslogs", options: { "awslogs-group": "/ecs/citio", "awslogs-region": region, "awslogs-stream-prefix": "auth-setup", "awslogs-create-group": "true" } }
-          }]
+    try {
+      const { subnetId, securityGroupId } = getServiceNetworkConfig(region, profileFlag);
+      let authBootstrapped = false;
+
+      if (setupMode === "upload_local_auth") {
+        s.start("Uploading local Codex credentials to EFS...");
+        const authTask = startCodexAuthSetupTask({
+          accountId,
+          ecrUri,
+          region,
+          profileFlag,
+          efsFileSystemId,
+          subnetId,
+          securityGroupId,
+          mode: "upload_local_auth",
+          localAuthJson: readFileSync(localAuthPath, "utf-8"),
         });
+        const { exitCode } = waitForTaskStop(authTask.taskArn, region, profileFlag, 12, 10);
+        if (exitCode === "0") {
+          s.stop("Codex credentials uploaded to EFS.");
+          authBootstrapped = true;
+        } else {
+          s.stop("Codex credential upload failed.");
+          p.log.warn("Falling back to in-container device auth may be required.");
+        }
+      } else {
+        s.start("Starting Codex device auth task...");
+        const authTask = startCodexAuthSetupTask({
+          accountId,
+          ecrUri,
+          region,
+          profileFlag,
+          efsFileSystemId,
+          subnetId,
+          securityGroupId,
+          mode: "device_auth",
+        });
+        s.stop("Codex device auth task started.");
 
-        writeFileSync("/tmp/citio-auth-task.json", efsTaskDef);
-        const authRev = execSync(`aws ecs register-task-definition --cli-input-json file:///tmp/citio-auth-task.json --region ${region} ${profileFlag} --query 'taskDefinition.revision' --output text`, { encoding: "utf-8", stdio: "pipe" }).trim();
-        const authTaskArn = execSync(`aws ecs run-task --cluster citio --task-definition "citio-auth-setup:${authRev}" --launch-type FARGATE --network-configuration "awsvpcConfiguration={subnets=[${svcSubnet}],securityGroups=[${svcSg}],assignPublicIp=ENABLED}" --region ${region} ${profileFlag} --query 'tasks[0].taskArn' --output text`, { encoding: "utf-8", stdio: "pipe" }).trim();
+        p.log.info(
+          "Complete the OpenAI device-auth flow shown in the task logs below.\n" +
+          "Once the login finishes, the saved auth on EFS will be reused and refreshed by Codex on future boots."
+        );
 
-        // Wait for completion
-        for (let i = 0; i < 12; i++) {
-          execSync("sleep 10", { stdio: "pipe" });
-          const status = execSync(`aws ecs describe-tasks --cluster citio --tasks "${authTaskArn}" --region ${region} ${profileFlag} --query 'tasks[0].lastStatus' --output text`, { encoding: "utf-8", stdio: "pipe" }).trim();
-          if (status === "STOPPED") {
-            const code = execSync(`aws ecs describe-tasks --cluster citio --tasks "${authTaskArn}" --region ${region} ${profileFlag} --query 'tasks[0].containers[0].exitCode' --output text`, { encoding: "utf-8", stdio: "pipe" }).trim();
-            s.stop(code === "0" ? "Credentials uploaded to EFS!" : "Credential upload may have failed.");
+        const seenMessages = new Set<string>();
+        let exitCode = "";
+        for (let i = 0; i < 36; i++) {
+          printNewCloudWatchLines("/ecs/citio", authTask.logStream, region, profileFlag, seenMessages);
+          const result = waitForTaskStop(authTask.taskArn, region, profileFlag, 1, 10);
+          if (result.exitCode) {
+            exitCode = result.exitCode;
             break;
           }
         }
 
-        // Restart main service to pick up credentials
-        execSync(`aws ecs update-service --cluster citio --service citio --force-new-deployment --region ${region} ${profileFlag}`, { stdio: "pipe" });
-      } catch (err) {
-        s.stop("Could not upload credentials.");
-        p.log.warn("Set OPENAI_API_KEY env var as fallback.");
+        if (exitCode === "0") {
+          p.log.success("Codex device auth completed and was saved to EFS.");
+          authBootstrapped = true;
+        } else {
+          p.log.warn("Codex device auth did not finish successfully. Re-run the installer or use OPENAI_API_KEY as a fallback.");
+        }
       }
+
+      if (authBootstrapped) {
+        execSync(
+          `aws ecs update-service --cluster citio --service citio --force-new-deployment --region ${region} ${profileFlag}`,
+          { stdio: "pipe" }
+        );
+      }
+    } catch (err) {
+      p.log.warn(`Codex OAuth bootstrap failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -1017,21 +1325,6 @@ async function deployToAws(config: InitConfig): Promise<void> {
     }
   }
 
-  // Codex device auth relay
-  if (config.authMethod === "oauth" && config.provider === "codex" && serviceHealthy) {
-    p.log.info("\nCodex needs device auth. Tailing logs for the auth URL...");
-    p.log.info("Look for a URL like https://login.openai.com/device and a code.");
-    p.log.info("Press Ctrl+C once you've completed auth in your browser.\n");
-    try {
-      execSync(
-        `aws logs tail /ecs/citio --region ${region} ${profileFlag} --follow --since 2m`,
-        { stdio: "inherit", timeout: 180000 }
-      );
-    } catch {
-      // Ctrl+C throws, that's expected
-    }
-  }
-
   // Final status
   p.log.success(serviceHealthy ? "\nCitio is live!" : "\nDeployment started.");
   p.log.info(
@@ -1061,6 +1354,7 @@ async function main(): Promise<void> {
       repos: config.repos,
       rules: config.rules,
       skills: config.skills,
+      gitUserEmail: config.gitUserEmail || undefined,
       awsRegion: config.awsRegion,
       awsProfile: config.awsProfile,
       enableEfs: config.enableEfs,
