@@ -16,7 +16,7 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "Self-hosted MCP server for autonomous coding agents with Slack integration",
+  "description": "Self-hosted AI coding agents that live in Slack — run Claude Code or Codex in your own infra, ship PRs, and keep every credential behind a controlled MCP tool layer.",
   "type": "module",
   "dependencies": {
     "@aws-sdk/client-ec2": "^3.1019.0",

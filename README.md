@@ -1,6 +1,6 @@
 # Citio
 
-Citio is a self-hosted Slack-native control plane for coding agents. It connects Slack requests to Claude Code or OpenAI Codex, exposes controlled MCP tools for repo/log/PR work, and runs as an AWS ECS service.
+**Self-hosted AI coding agents that live in your Slack.** Ask for real engineering work in a message — investigate a bug, dig through CloudWatch logs, fix code, open a PR — and Citio runs Claude Code or OpenAI Codex inside your own infrastructure to do it. Slack is the interface, a controlled MCP tool layer is the safety boundary, and every credential stays in your AWS account.
 
 ## Problem
 
