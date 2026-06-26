@@ -2,9 +2,11 @@
 
 # 🤖 Citio
 
-**Self-hosted AI coding agents that live in your Slack.**
+**Your own AI engineering teammate — self-hosted, living in Slack.**
 
-Ask for real engineering work in a message — investigate a bug, dig through CloudWatch logs, fix code, open a PR — and Citio runs **Claude Code** or **OpenAI Codex** inside your own infrastructure to do it. Slack is the interface, a controlled MCP tool layer is the safety boundary, and every credential stays in your AWS account.
+`@mention` it or DM it and ask for real engineering work — investigate a bug, dig through CloudWatch logs, fix code, open a PR — and Citio runs **Claude Code** or **OpenAI Codex** inside your own infrastructure to do it. Slack is the interface, a controlled MCP tool layer is the safety boundary, and every credential stays in your AWS account.
+
+**No Team or Enterprise plan required.** Citio runs on an individual **Claude Max/Pro** or **ChatGPT Plus (Codex)** subscription — the agent you already pay for, now working from Slack.
 
 <br/>
 
@@ -18,8 +20,9 @@ Ask for real engineering work in a message — investigate a bug, dig through Cl
 
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-supported-D97757.svg?logo=anthropic&logoColor=white)](https://docs.anthropic.com/en/docs/claude-code)
 [![OpenAI Codex](https://img.shields.io/badge/OpenAI%20Codex-supported-412991.svg?logo=openai&logoColor=white)](https://openai.com/codex/)
+[![No Enterprise plan needed](https://img.shields.io/badge/subscription-friendly-success.svg)](#-citio-vs-hosted-slack-agents)
 
-[**Quickstart**](#-quickstart) · [**How it works**](#-how-it-works) · [**Configuration**](#-configuration) · [**Architecture**](docs/ARCHITECTURE.md) · [**Contributing**](CONTRIBUTING.md) · [**Security**](SECURITY.md)
+[**Quickstart**](#-quickstart) · [**How it works**](#-how-it-works) · [**Compare**](#-citio-vs-hosted-slack-agents) · [**Configuration**](#-configuration) · [**Architecture**](docs/ARCHITECTURE.md) · [**Contributing**](CONTRIBUTING.md) · [**Security**](SECURITY.md)
 
 </div>
 
@@ -37,6 +40,20 @@ Citio closes that gap:
 - 🏠 **Everything runs in your infra** — your container, your AWS account, your keys.
 
 The result is something that can investigate bugs, inspect logs, edit code, and open pull requests — without a human sitting in the middle of every request.
+
+## 🆚 Citio vs. hosted Slack agents
+
+Anthropic's [Claude Tag](https://techcrunch.com/2026/06/23/anthropics-claude-tag-is-learning-your-company-one-slack-message-at-a-time/) (June 2026) popularized exactly this idea — `@mention` an AI teammate in Slack and it does the work in-thread — but it's an Anthropic-hosted service gated to **Claude Team and Enterprise** plans, Claude-only. Citio takes the self-hosted, bring-your-own-subscription path:
+
+|                    | **Citio**                                          | **Claude Tag**                       |
+| ------------------ | -------------------------------------------------- | ------------------------------------ |
+| **Hosting**        | Your AWS account, your infra                       | Anthropic-hosted SaaS                |
+| **Plan required**  | Individual **Claude Max/Pro** *or* **ChatGPT Plus** | **Claude Team or Enterprise**        |
+| **Providers**      | Claude Code **or** OpenAI Codex                    | Claude only                          |
+| **Credentials**    | Stay with you, behind an MCP allowlist             | Managed by the vendor                |
+| **Best for**       | Solo devs & small teams who self-host              | Orgs already on Team/Enterprise      |
+
+If you already pay for a Claude or ChatGPT subscription, Citio puts that same agent to work from Slack — no per-seat enterprise upgrade, no handing your code and credentials to someone else's cloud.
 
 ## 🧩 Features
 
