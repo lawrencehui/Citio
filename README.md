@@ -103,7 +103,7 @@ More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 ```bash
 npm ci
 npm run build
-citio
+npm run init        # interactive installer (or `citio` after `npm i -g citio`)
 ```
 
 The installer will:
