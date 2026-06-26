@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`mcp__citio__*`) were renamed accordingly. AWS deployment resource names are
   unchanged.
 - Revamped the README into a standard open-source layout.
+- Switched the project license from ISC to MIT.
 
 ### Added
 

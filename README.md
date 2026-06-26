@@ -11,7 +11,7 @@
 <br/>
 
 [![Status](https://img.shields.io/badge/status-pre--1.0-orange.svg)](docs/KNOWN_LIMITATIONS.md)
-[![License: ISC](https://img.shields.io/badge/license-ISC-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A5%2022-339933.svg?logo=node.js&logoColor=white)](package.json)
 [![TypeScript](https://img.shields.io/badge/TypeScript-3178C6.svg?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Slack-native](https://img.shields.io/badge/Slack-native-4A154B.svg?logo=slack&logoColor=white)](#-how-it-works)
@@ -202,4 +202,4 @@ Found a vulnerability? Please report it privately — see [SECURITY.md](SECURITY
 
 ## 📄 License
 
-[ISC](LICENSE)
+[MIT](LICENSE)

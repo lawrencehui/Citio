@@ -21,7 +21,7 @@
     "type": "git",
     "url": "git+https://github.com/lawrencehui/Citio.git"
   },
-  "license": "ISC",
+  "license": "MIT",
   "author": "Lawrence Hui <hkc.lawrence@gmail.com>",
   "type": "module",
   "main": "dist/index.js",
