@@ -22,7 +22,7 @@
 [![OpenAI Codex](https://img.shields.io/badge/OpenAI%20Codex-supported-412991.svg?logo=openai&logoColor=white)](https://openai.com/codex/)
 [![No Enterprise plan needed](https://img.shields.io/badge/subscription-friendly-success.svg)](#-citio-vs-hosted-slack-agents)
 
-[**Quickstart**](#-quickstart) · [**How it works**](#-how-it-works) · [**Compare**](#-citio-vs-hosted-slack-agents) · [**Configuration**](#-configuration) · [**Architecture**](docs/ARCHITECTURE.md) · [**Contributing**](CONTRIBUTING.md) · [**Security**](SECURITY.md)
+[**Quickstart**](#-quickstart) · [**How it works**](#-how-it-works) · [**Compare**](#-citio-vs-hosted-slack-agents) · [**Configuration**](#-configuration) · [**Customize**](#-customizing-your-instance) · [**Architecture**](docs/ARCHITECTURE.md) · [**Contributing**](CONTRIBUTING.md) · [**Security**](SECURITY.md)
 
 </div>
 
@@ -90,13 +90,70 @@ More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 ## 🚀 Quickstart
 
-**Prerequisites**
+### Prerequisites
 
-- Docker
-- AWS CLI (configured for your account)
-- Git
-- A Slack app with bot token and app token
-- A GitHub PAT with repo `contents` + `pull_requests` permissions
+**On your machine** (the installer hard-checks for Docker, AWS CLI, and Git):
+
+| Tool | Version / note |
+| ---- | -------------- |
+| **Node.js** | ≥ 22 |
+| **Docker** | Running. The image is built `linux/amd64` — on Apple Silicon, Docker Desktop's buildx cross-builds it. |
+| **AWS CLI** | v2, authenticated (`aws configure` or `aws sso login`) with a profile that has the permissions below. |
+| **Git** | Any recent version. |
+
+> The agent CLIs (`claude`, `codex`), `gh`, and `jq` ship **inside the container image** — you don't install them on the host.
+
+**Accounts & tokens**
+
+- An **agent subscription**: Claude Max/Pro, or ChatGPT Plus for Codex (API key works as a fallback).
+- A **Slack app** (the installer can create it for you from a config token) + the target channel ID.
+- A **GitHub fine-grained PAT** with `contents: write` + `pull_requests: write` on the repos you want worked on.
+
+**Minimum AWS profile permissions**
+
+The installer provisions the whole stack (ECR repo, ECS cluster/service, EFS, IAM roles, a security group) and reads logs, so the deploying profile needs create/manage rights across those services. Easiest path: use an **admin-capable profile in a dev/sandbox account**. For least privilege, this inline policy covers exactly what the installer calls:
+
+<details>
+<summary>Least-privilege IAM policy (click to expand)</summary>
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Sid": "Identity", "Effect": "Allow", "Action": ["sts:GetCallerIdentity"], "Resource": "*" },
+    { "Sid": "Ecr", "Effect": "Allow", "Action": [
+      "ecr:CreateRepository", "ecr:GetAuthorizationToken",
+      "ecr:BatchCheckLayerAvailability", "ecr:InitiateLayerUpload",
+      "ecr:UploadLayerPart", "ecr:CompleteLayerUpload", "ecr:PutImage",
+      "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"
+    ], "Resource": "*" },
+    { "Sid": "Ecs", "Effect": "Allow", "Action": [
+      "ecs:CreateCluster", "ecs:RegisterTaskDefinition", "ecs:CreateService",
+      "ecs:UpdateService", "ecs:DescribeServices", "ecs:DescribeTasks",
+      "ecs:ListTasks", "ecs:RunTask"
+    ], "Resource": "*" },
+    { "Sid": "Efs", "Effect": "Allow", "Action": [
+      "elasticfilesystem:CreateFileSystem", "elasticfilesystem:DescribeFileSystems",
+      "elasticfilesystem:CreateMountTarget", "elasticfilesystem:DescribeMountTargets"
+    ], "Resource": "*" },
+    { "Sid": "Iam", "Effect": "Allow", "Action": [
+      "iam:CreateRole", "iam:AttachRolePolicy", "iam:PutRolePolicy", "iam:PassRole"
+    ], "Resource": "*" },
+    { "Sid": "Ec2", "Effect": "Allow", "Action": [
+      "ec2:CreateSecurityGroup", "ec2:DescribeSecurityGroups",
+      "ec2:DescribeSubnets", "ec2:DescribeVpcs"
+    ], "Resource": "*" },
+    { "Sid": "Logs", "Effect": "Allow", "Action": [
+      "logs:FilterLogEvents", "logs:GetLogEvents",
+      "logs:DescribeLogGroups", "logs:DescribeLogStreams", "logs:StartLiveTail"
+    ], "Resource": "*" }
+  ]
+}
+```
+
+`iam:PassRole` is required because the ECS task definition references the `citio-task-execution` role. Scope `Resource` down to your account/region ARNs for production.
+
+</details>
 
 **Install and run the interactive installer**
 
@@ -150,6 +207,26 @@ deploy:
 | `CITIO_CONFIG_B64`   | Base64-encoded config (used by ECS, no file mount) |
 | `CITIO_WORKSPACE`    | Workspace path (default `/workspace`)            |
 | `CITIO_MEMORY`       | Memory/audit path (default `/memory`)            |
+
+## 🎛️ Customizing your instance
+
+Yes — a Citio instance is configured almost entirely through `citio.yaml` (the installer writes it for you, and you can hand-edit then redeploy). The main knobs:
+
+| Setting | Where | What it controls |
+| ------- | ----- | ---------------- |
+| **Provider** | `engine.default_provider` | `claude` or `codex` |
+| **Agent rules** | `workspace.rules[]` | Plain-English guardrails injected into the agent ("always open PRs", "check logs before editing", your own policies) |
+| **Repos** | `workspace.repos[]` | Which repos (and branches) the agent may clone and work on |
+| **Who can use it** | `slack.authorized_users[]` / `admin_users[]` | Restrict channel `@mention`s and DMs to specific Slack user IDs (empty = everyone) |
+| **Session limits** | `engine.max_session_duration_minutes`, `max_concurrent_sessions` | How long a task can run; how many run at once (1 = strictly serialized) |
+| **Skills** | `skills.installed[]` | Optional community skill packs the agent can use |
+| **Commit identity** | `workspace.git.user_name` / `user_email` | Author on commits the agent makes |
+| **Bot name** | Slack app manifest (set at install) | The `@name` it answers to |
+| **AWS sizing & names** | `deploy.aws.task_cpu`, `task_memory`, `ephemeral_storage_gb`, `ecr_repo`, `ecs_cluster`, `ecs_service`, `region` | Container resources and the names of the resources Citio provisions |
+
+The fastest way to change behavior is usually `workspace.rules` — those instructions shape how the agent investigates, edits, and reports. After editing `citio.yaml`, re-run `npm run init` (or restart the container) to apply.
+
+See [`citio.example.yaml`](citio.example.yaml) for the full annotated shape.
 
 ## 🧱 Supported today
 
