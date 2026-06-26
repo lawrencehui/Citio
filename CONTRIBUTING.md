@@ -18,7 +18,7 @@ npm run dev
 Run the installer locally:
 
 ```bash
-citio
+npm run init
 ```
 
 ## Contribution Guidelines
