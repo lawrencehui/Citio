@@ -155,15 +155,25 @@ The installer provisions the whole stack (ECR repo, ECS cluster/service, EFS, IA
 
 </details>
 
-**Install and run the interactive installer**
+### Install and run
+
+**Fastest — one command** (uses the published package, no clone, no build):
 
 ```bash
-npm ci
-npm run build
-npm run init        # interactive installer (or `citio` after `npm i -g citio`)
+npx citio
 ```
 
-The installer will:
+**Or build from source** (to read/modify the code first, or to contribute):
+
+```bash
+git clone https://github.com/lawrencehui/Citio.git
+cd Citio
+npm ci
+npm run build
+npm run init
+```
+
+Both launch the **same** guided installer, which will:
 
 - collect provider and auth settings (subscription OAuth first, API key as fallback)
 - collect Slack and GitHub credentials (stored in your OS keychain when available)

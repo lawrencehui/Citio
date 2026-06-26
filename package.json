@@ -28,6 +28,15 @@
   "bin": {
     "citio": "./dist/cli/init.js"
   },
+  "files": [
+    "dist",
+    "Dockerfile",
+    ".dockerignore",
+    "citio.example.yaml"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=22"
   },
@@ -37,7 +46,8 @@
     "init": "tsx src/cli/init.ts",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test test/**/*.test.ts"
+    "test": "tsx --test test/**/*.test.ts",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@aws-sdk/client-ec2": "^3.1019.0",

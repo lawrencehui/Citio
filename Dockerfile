@@ -18,8 +18,10 @@ RUN apt-get update && apt-get install -y \
 
 # Copy application
 WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+# package-lock.json is present in source builds (npm ci = reproducible) but is
+# stripped by npm from the published package, so fall back to npm install there.
+COPY package.json package-lock.json* ./
+RUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit=dev; fi
 COPY dist/ ./dist/
 
 # Config volume — mount your citio.yaml here, edit anytime, restart to apply

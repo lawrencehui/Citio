@@ -902,7 +902,11 @@ async function deployToAws(config: InitConfig): Promise<void> {
 
   // 3. Build and push Docker image
   s.start("Building Docker image...");
-  runDeployCommand("npm run build", "Failed to build the TypeScript application before Docker packaging.", { cwd: projectDir });
+  // From a source checkout, compile dist/ first. When running from an installed
+  // package (e.g. `npx citio`), dist/ ships prebuilt and there is no src/ to compile.
+  if (existsSync(path.join(projectDir, "src"))) {
+    runDeployCommand("npm run build", "Failed to build the TypeScript application before Docker packaging.", { cwd: projectDir });
+  }
 
   // Auth is handled at RUNTIME via env vars in the ECS task definition,
   // never baked into the Docker image.

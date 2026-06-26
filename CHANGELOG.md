@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **One-command install** via `npx citio` — the package now ships its build
+  context (`dist/`, `Dockerfile`), so the installer runs without cloning or
+  building. Building from source (`git clone` + `npm run init`) still works; the
+  Docker build uses `npm ci` when a lockfile is present and falls back to
+  `npm install` for the published package.
 - Community-health files: Code of Conduct, this changelog, and issue/PR templates.
 - Filled out `package.json` metadata (author, keywords, repository, engines).
 
