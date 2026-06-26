@@ -1,9 +1,35 @@
 {
   "name": "citio",
   "version": "0.1.3",
+  "description": "Self-hosted AI coding agents that live in Slack — run Claude Code or Codex in your own infra, ship PRs, and keep every credential behind a controlled MCP tool layer.",
+  "keywords": [
+    "slack",
+    "ai-agent",
+    "claude-code",
+    "codex",
+    "mcp",
+    "devops",
+    "self-hosted",
+    "aws-ecs",
+    "coding-agent"
+  ],
+  "homepage": "https://github.com/lawrencehui/Citio#readme",
+  "bugs": {
+    "url": "https://github.com/lawrencehui/Citio/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lawrencehui/Citio.git"
+  },
+  "license": "ISC",
+  "author": "Lawrence Hui <hkc.lawrence@gmail.com>",
+  "type": "module",
   "main": "dist/index.js",
   "bin": {
     "citio": "./dist/cli/init.js"
+  },
+  "engines": {
+    "node": ">=22"
   },
   "scripts": {
     "dev": "tsx src/index.ts",
@@ -13,11 +39,6 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx --test test/**/*.test.ts"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "Self-hosted AI coding agents that live in Slack — run Claude Code or Codex in your own infra, ship PRs, and keep every credential behind a controlled MCP tool layer.",
-  "type": "module",
   "dependencies": {
     "@aws-sdk/client-ec2": "^3.1019.0",
     "@aws-sdk/client-ecr": "^3.1019.0",

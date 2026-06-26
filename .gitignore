@@ -8,3 +8,7 @@ citio.yaml
 /workspace/
 /memory/
 .docker-*-auth
+
+# Local machine state
+.claude/settings.local.json
+*.local.md
