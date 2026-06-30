@@ -8,7 +8,7 @@ Citio is currently pre-1.0. Security fixes should be assumed to land on the late
 
 Please do not open a public GitHub issue for credential handling, auth bypass, shell injection, or sandbox escape issues.
 
-Report security concerns privately to the project maintainer first with:
+Report security concerns privately to **hkc.lawrence@gmail.com** (or via GitHub's private vulnerability reporting, if enabled) with:
 
 - a short description of the issue
 - affected version or commit
