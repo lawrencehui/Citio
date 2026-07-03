@@ -24,6 +24,12 @@
 
 [**Quickstart**](#-quickstart) · [**How it works**](#-how-it-works) · [**Compare**](#-citio-vs-hosted-slack-agents) · [**Configuration**](#-configuration) · [**Customize**](#-customizing-your-instance) · [**Architecture**](docs/ARCHITECTURE.md) · [**Contributing**](CONTRIBUTING.md) · [**Security**](SECURITY.md)
 
+<br/>
+
+![Citio turning a Slack message into a pull request](docs/screenshots/demo.gif)
+
+*A Slack message becomes an investigated, tested pull request — without leaving the thread.*
+
 </div>
 
 ---
@@ -259,12 +265,17 @@ npm run dev         # run locally with tsx
 
 ## 📸 Screenshots
 
-Screenshot assets aren't committed yet. Recommended launch assets:
+**The PR Citio opened** — real, reviewable work on GitHub:
 
-- Slack DM flow → `docs/screenshots/slack-dm.png`
-- Slack channel `@mention` flow → `docs/screenshots/slack-channel.png`
-- Installer flow → `docs/screenshots/installer.png`
-- A PR opened by Citio → `docs/screenshots/pr.png`
+![A pull request opened by Citio](docs/screenshots/pr.png)
+
+**Working in a channel** — `@mention` it where your team already talks:
+
+![Citio responding to a channel mention](docs/screenshots/slack-channel.png)
+
+**The installer** — one guided command from zero to deployed:
+
+![The Citio interactive installer](docs/screenshots/installer.png)
 
 ## 🗺️ Status & roadmap
 
