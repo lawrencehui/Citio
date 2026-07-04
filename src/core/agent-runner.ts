@@ -330,6 +330,11 @@ export class AgentRunner {
           env: this.buildCodexEnv(),
         });
 
+        // The prompt is passed as an argument; `codex exec` still watches stdin and
+        // prints "Reading additional input from stdin..." and blocks until it is closed.
+        // Close it immediately so the run isn't stuck waiting for input that never comes.
+        child.stdin?.end();
+
         let finalResult = "";
         let stderrOutput = "";
         let lineBuffer = "";
