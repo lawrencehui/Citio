@@ -26,7 +26,7 @@
 
 <br/>
 
-![Citio turning a Slack message into a pull request](docs/screenshots/demo.gif)
+<!-- ![Citio turning a Slack message into a pull request](docs/screenshots/demo.gif) — uncomment when the asset lands -->
 
 *A Slack message becomes an investigated, tested pull request — without leaving the thread.*
 
@@ -267,15 +267,15 @@ npm run dev         # run locally with tsx
 
 **The PR Citio opened** — real, reviewable work on GitHub:
 
-![A pull request opened by Citio](docs/screenshots/pr.png)
+<!-- ![A pull request opened by Citio](docs/screenshots/pr.png) — uncomment when the asset lands -->
 
 **Working in a channel** — `@mention` it where your team already talks:
 
-![Citio responding to a channel mention](docs/screenshots/slack-channel.png)
+<!-- ![Citio responding to a channel mention](docs/screenshots/slack-channel.png) — uncomment when the asset lands -->
 
 **The installer** — one guided command from zero to deployed:
 
-![The Citio interactive installer](docs/screenshots/installer.png)
+<!-- ![The Citio interactive installer](docs/screenshots/installer.png) — uncomment when the asset lands -->
 
 ## 🗺️ Status & roadmap
 
