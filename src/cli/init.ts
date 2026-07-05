@@ -818,18 +818,19 @@ async function collectConfig(): Promise<InitConfig> {
   // Fail fast on credentials — better here than 10 minutes into the Docker build.
   await ensureAwsCredentials(awsProfile);
 
+  // Codex OAuth stores the container's own credentials on EFS — not optional,
+  // so don't ask a question that only has one valid answer.
   const efsRequiredForCodex = provider === "codex" && authMethod === "oauth";
-  const enableEfs = (await p.confirm({
-    message: efsRequiredForCodex
-      ? "Enable EFS persistence? (REQUIRED for Codex OAuth — it keeps ~/.codex/auth.json across restarts)"
-      : "Enable EFS persistence for workspace, memory, and auth? Recommended for repo state across redeploys.",
-    initialValue: savedState.enableEfs ?? true,
-  })) as boolean;
-  if (p.isCancel(enableEfs)) process.exit(0);
-
-  if (!enableEfs && provider === "codex" && authMethod === "oauth") {
-    p.log.error("Codex OAuth requires EFS so the container can persist ~/.codex/auth.json across restarts.");
-    process.exit(1);
+  let enableEfs: boolean;
+  if (efsRequiredForCodex) {
+    enableEfs = true;
+    p.log.info("EFS persistence: enabled automatically (Codex OAuth keeps its credentials there).");
+  } else {
+    enableEfs = (await p.confirm({
+      message: "Enable EFS persistence for workspace, memory, and auth? Recommended for repo state across redeploys.",
+      initialValue: savedState.enableEfs ?? true,
+    })) as boolean;
+    if (p.isCancel(enableEfs)) process.exit(0);
   }
 
   return {
