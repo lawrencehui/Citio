@@ -290,26 +290,13 @@ function copyToClipboard(text: string): boolean {
 }
 
 async function promptSlackTokensManually(savedState: Awaited<ReturnType<typeof loadSavedInstallerState>>): Promise<{ slackBotToken: string; slackAppToken: string }> {
-  const manifestJson = JSON.stringify(buildCitioSlackManifest(), null, 2);
-  const manifestPath = path.join(process.cwd(), "slack-app-manifest.json");
-  writeFileSync(manifestPath, manifestJson + "\n");
-  const copied = copyToClipboard(manifestJson);
-
   p.note(
-    "You'll create the Slack app by pasting a ready-made manifest —\n" +
-    "no scope-hunting needed. The manifest sets every permission,\n" +
-    "event subscription, and Socket Mode for you.",
+    "You'll create the Slack app by pasting a ready-made “manifest” —\n" +
+    "a JSON blueprint of the app that sets every permission, event\n" +
+    "subscription, and Socket Mode for you. No scope-hunting needed.\n" +
+    "We'll put it on your clipboard right before you need it.",
     "Guided Slack setup (~3 minutes)"
   );
-
-  if (copied) {
-    p.log.success(`The app manifest is on your clipboard (also saved to ${manifestPath}).`);
-  } else {
-    p.log.info(`The app manifest is saved to ${manifestPath} — copy its contents, or copy the block below:`);
-    console.log("–––––––––––––––––––––––––––––––––––––––––––––");
-    console.log(manifestJson);
-    console.log("–––––––––––––––––––––––––––––––––––––––––––––");
-  }
 
   // Sign-in gate BEFORE opening the create-app page — the create dialog renders an
   // empty workspace dropdown (no error) when the browser has no Slack session.
@@ -332,13 +319,30 @@ async function promptSlackTokensManually(savedState: Awaited<ReturnType<typeof l
     if (p.isCancel(ready) || !ready) process.exit(0);
   }
 
+  // Copy the manifest HERE — immediately before the step that pastes it — so the
+  // clipboard is fresh and the instruction sits next to the action.
+  const manifestJson = JSON.stringify(buildCitioSlackManifest(), null, 2);
+  const manifestPath = path.join(process.cwd(), "slack-app-manifest.json");
+  writeFileSync(manifestPath, manifestJson + "\n");
+  const copied = copyToClipboard(manifestJson);
+  if (copied) {
+    p.log.success(`✔ App manifest copied to your clipboard (backup: ${manifestPath})`);
+  } else {
+    p.log.info(`Copy the app manifest from ${manifestPath}, or copy the block below:`);
+    console.log("–––––––––––––––––––––––––––––––––––––––––––––");
+    console.log(manifestJson);
+    console.log("–––––––––––––––––––––––––––––––––––––––––––––");
+  }
+
   const openedCreate = openBrowser(CREATE_APP_URL);
   p.note(
     `STEP 1 — Create the app (${openedCreate ? "a browser window just opened" : `open ${CREATE_APP_URL}`})\n` +
     `  • If you get signed out at any point: sign in at slack.com/signin,\n` +
     `    then return to ${CREATE_APP_URL}\n` +
     "  • Choose “From a manifest” → pick your workspace → Next\n" +
-    "  • Select the JSON tab, paste the manifest, → Next → Create\n" +
+    "  • Select the JSON tab and paste the manifest we just copied\n" +
+    `    (${copied ? "it's on your clipboard — just press Cmd+V / Ctrl+V" : `copy it from ${manifestPath}`};\n` +
+    "    replace whatever placeholder JSON Slack shows) → Next → Create\n" +
     "\n" +
     "STEP 2 — Install it\n" +
     "  • On the app page: “Install App” (left sidebar) → “Install to Workspace” → Allow\n" +
