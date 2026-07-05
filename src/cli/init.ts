@@ -35,15 +35,12 @@ interface InitConfig {
   enableEfs: boolean;
 }
 
+// Curated for Citio's job (investigate bugs, read logs, fix code, open PRs).
+// Every install command below is verified working with `npx skills add`.
 const SKILL_REGISTRY: Record<string, { url: string; description: string; installMethod: "git" | "npx-skills" | "npx" }> = {
-  gstack: {
-    url: "https://github.com/garrytan/gstack.git",
-    description: "QA, shipping, investigation, deploy, design review",
-    installMethod: "git",
-  },
-  "frontend-design": {
-    url: "anthropics/claude-code --skill frontend-design",
-    description: "Production-grade UI generation, avoids default design patterns",
+  "systematic-debugging": {
+    url: "obra/superpowers --skill systematic-debugging",
+    description: "Root-cause debugging discipline — find the bug before patching it",
     installMethod: "npx-skills",
   },
   "code-reviewer": {
@@ -51,10 +48,25 @@ const SKILL_REGISTRY: Record<string, { url: string; description: string; install
     description: "Code quality review, deduplication, performance checks",
     installMethod: "npx-skills",
   },
-  "antigravity-awesome-skills": {
-    url: "npx antigravity-awesome-skills --claude",
-    description: "1,234+ curated skills: brainstorming, architecture, debugging, API design",
-    installMethod: "npx",
+  "webapp-testing": {
+    url: "anthropics/skills --skill webapp-testing",
+    description: "Official Anthropic: verify fixes by driving the web app in a browser",
+    installMethod: "npx-skills",
+  },
+  "frontend-design": {
+    url: "anthropics/claude-code --skill frontend-design",
+    description: "Production-grade UI generation, avoids default design patterns",
+    installMethod: "npx-skills",
+  },
+  "skill-creator": {
+    url: "anthropics/skills --skill skill-creator",
+    description: "Official Anthropic: turn your team's own processes into custom skills",
+    installMethod: "npx-skills",
+  },
+  gstack: {
+    url: "https://github.com/garrytan/gstack.git",
+    description: "QA, shipping, investigation, deploy, design review",
+    installMethod: "git",
   },
 };
 
@@ -777,7 +789,7 @@ async function collectConfig(): Promise<InitConfig> {
 
   // Skills
   const skillChoices = (await p.multiselect({
-    message: "Install community skills? (use space to select, enter to confirm)",
+    message: "Install agent skills? Optional — all can be added later; skills run with the agent's full permissions (space to select, enter to confirm)",
     options: Object.entries(SKILL_REGISTRY).map(([name, info]) => ({
       value: name,
       label: name,
