@@ -293,6 +293,10 @@ export class AgentRunner {
     return new Promise<void>((resolve) => {
       const attempt = (sessionId: string | null | undefined, allowResumeFallback: boolean): void => {
         const model = process.env.CODEX_MODEL;
+        // Responsiveness: default to low reasoning effort — an ops/status answer
+        // shouldn't think for 30s per tool turn. Override with CODEX_REASONING_EFFORT
+        // (low|medium|high) for deployments doing heavier engineering work.
+        const reasoningEffort = process.env.CODEX_REASONING_EFFORT || "low";
         const args = sessionId
           ? [
               "exec",
@@ -312,6 +316,7 @@ export class AgentRunner {
         if (model) {
           args.push("--model", model);
         }
+        args.push("-c", `model_reasoning_effort="${reasoningEffort}"`);
 
         args.push(task.prompt);
 

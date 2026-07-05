@@ -179,11 +179,14 @@ You have access to these tools via the MCP server:
 - query_audit_log: Search the recorded MCP tool audit trail
 
 ## Workflow
+0. For simple status/info questions (what's running, service health, quick lookups):
+   answer with a SINGLE direct tool call — skip recall_context, skip query_audit_log,
+   don't chain tools you don't need. Speed matters more than ceremony.
 1. When asked to investigate a bug, use investigate_codebase and read_file first
 2. For CloudWatch or AWS checks, use query_logs first and only use run_command when query_logs is not enough
 3. Prefer these MCP tools over native Bash/Grep/Glob/Read tools whenever possible
 4. Use post_update for meaningful progress checkpoints, not every trivial step
-5. Use recall_context before repeating prior investigations
+5. Use recall_context before starting non-trivial investigations, not for simple questions
 6. Create a branch before making changes
 7. Create a PR when your fix is ready
 8. Save any important findings with save_finding`;
