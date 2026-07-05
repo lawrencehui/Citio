@@ -1194,11 +1194,33 @@ async function deployToAws(config: InitConfig): Promise<boolean> {
     // Add CloudWatch Logs permissions (needed for awslogs-create-group)
     const logsPolicy = JSON.stringify({
       Version: "2012-10-17",
-      Statement: [{
-        Effect: "Allow",
-        Action: ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogStreams"],
-        Resource: "arn:aws:logs:*:*:*"
-      }]
+      Statement: [
+        {
+          Sid: "LogsWrite",
+          Effect: "Allow",
+          Action: ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogStreams"],
+          Resource: "arn:aws:logs:*:*:*"
+        },
+        {
+          // query_logs MCP tool — a headline feature — needs READ, not just write.
+          Sid: "LogsRead",
+          Effect: "Allow",
+          Action: ["logs:FilterLogEvents", "logs:GetLogEvents", "logs:DescribeLogGroups"],
+          Resource: "arn:aws:logs:*:*:*"
+        },
+        {
+          // Read-only deploy visibility — the app's own suggested prompt is
+          // "Check deploy health"; without these the agent gets AccessDenied.
+          Sid: "EcsReadOnlyVisibility",
+          Effect: "Allow",
+          Action: [
+            "ecs:ListClusters", "ecs:ListServices", "ecs:ListTasks",
+            "ecs:DescribeClusters", "ecs:DescribeServices", "ecs:DescribeTasks",
+            "ecs:DescribeTaskDefinition", "ecs:ListTaskDefinitions"
+          ],
+          Resource: "*"
+        }
+      ]
     });
     execSync(
       `aws iam put-role-policy --role-name citio-task-execution --policy-name citio-logs --policy-document '${logsPolicy}' ${profileFlag} 2>/dev/null || true`,
