@@ -16,6 +16,7 @@ import {
   validateSlackBotToken,
   validateSlackConfigToken,
 } from "../utils/slack-onboarding.js";
+import { SKILL_REGISTRY, installSkillsTo } from "../core/skills.js";
 
 interface InitConfig {
   provider: "codex" | "claude";
@@ -35,40 +36,7 @@ interface InitConfig {
   enableEfs: boolean;
 }
 
-// Curated for Citio's job (investigate bugs, read logs, fix code, open PRs).
-// Every install command below is verified working with `npx skills add`.
-const SKILL_REGISTRY: Record<string, { url: string; description: string; installMethod: "git" | "npx-skills" | "npx" }> = {
-  "systematic-debugging": {
-    url: "obra/superpowers --skill systematic-debugging",
-    description: "Root-cause debugging discipline — find the bug before patching it",
-    installMethod: "npx-skills",
-  },
-  "code-reviewer": {
-    url: "anthropics/claude-code --skill simplify",
-    description: "Code quality review, deduplication, performance checks",
-    installMethod: "npx-skills",
-  },
-  "webapp-testing": {
-    url: "anthropics/skills --skill webapp-testing",
-    description: "Official Anthropic: verify fixes by driving the web app in a browser",
-    installMethod: "npx-skills",
-  },
-  "frontend-design": {
-    url: "anthropics/claude-code --skill frontend-design",
-    description: "Production-grade UI generation, avoids default design patterns",
-    installMethod: "npx-skills",
-  },
-  "skill-creator": {
-    url: "anthropics/skills --skill skill-creator",
-    description: "Official Anthropic: turn your team's own processes into custom skills",
-    installMethod: "npx-skills",
-  },
-  gstack: {
-    url: "https://github.com/garrytan/gstack.git",
-    description: "QA, shipping, investigation, deploy, design review",
-    installMethod: "git",
-  },
-};
+
 
 function runDeployCommand(command: string, errorMessage: string, options: { cwd?: string; timeout?: number; encoding?: BufferEncoding } = {}): string {
   try {
@@ -1089,55 +1057,14 @@ function installSkills(skills: string[], githubToken: string): void {
   if (skills.length === 0) return;
 
   const skillsDir = ".citio/skills";
-  mkdirSync(skillsDir, { recursive: true });
-
-  const env = {
-    ...process.env,
-    GH_TOKEN: githubToken,
-    GIT_ASKPASS: "echo",
-    GIT_TERMINAL_PROMPT: "0",
-  };
-
-  for (const skill of skills) {
-    const info = SKILL_REGISTRY[skill];
-    if (!info) continue;
-
-    p.log.step(`Installing skill: ${skill}`);
-
-    try {
-      if (info.installMethod === "git") {
-        const skillPath = `${skillsDir}/${skill}`;
-        if (existsSync(skillPath)) {
-          execSync(`git -C "${skillPath}" pull --ff-only`, { stdio: "pipe", env });
-        } else {
-          const authedUrl = githubToken
-            ? info.url.replace("https://github.com/", `https://${githubToken}@github.com/`)
-            : info.url;
-          execSync(`git clone --depth 1 "${authedUrl}" "${skillPath}"`, {
-            stdio: "pipe",
-            env,
-          });
-        }
-      } else if (info.installMethod === "npx-skills") {
-        // Uses `npx skills add <source>` — the official skill installer
-        execSync(`npx skills add ${info.url}`, {
-          stdio: "pipe",
-          env,
-          timeout: 120000,
-        });
-      } else if (info.installMethod === "npx") {
-        // Direct npx command
-        execSync(info.url, {
-          stdio: "pipe",
-          env,
-          timeout: 120000,
-        });
-      }
-      p.log.success(`Installed ${skill}`);
-    } catch {
-      p.log.warn(
-        `Failed to install ${skill}. You can install it manually later.`
-      );
+  const results = installSkillsTo(skills, skillsDir, { ghToken: githubToken });
+  for (const result of results) {
+    if (result.status === "installed") {
+      p.log.success(`Installed skill: ${result.skill}`);
+    } else if (result.status === "already-present") {
+      p.log.info(`Skill already installed: ${result.skill}`);
+    } else {
+      p.log.warn(`Failed to install ${result.skill} — you can install it manually later.${result.error ? ` (${result.error.split("\n")[0]})` : ""}`);
     }
   }
 }

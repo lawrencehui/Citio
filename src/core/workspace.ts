@@ -2,6 +2,7 @@ import { execFileSync, execSync } from "child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "fs";
 import path from "path";
 import type { CitioConfig } from "../config/schema.js";
+import { installSkillsTo } from "./skills.js";
 
 export class WorkspaceManager {
   private workspacePath: string;
@@ -131,18 +132,35 @@ export class WorkspaceManager {
       }
     }
 
+    // Install configured skills into the directory loadSkills() reads.
+    // Idempotent (skips already-present skills), non-fatal on failure —
+    // this is how skills reach the container, which local installs cannot.
+    const configuredSkills = this.config.skills?.installed ?? [];
+    if (configuredSkills.length > 0) {
+      const results = installSkillsTo(configuredSkills, this.config.skills.directory, { ghToken });
+      for (const result of results) {
+        console.log(JSON.stringify({ type: "skill_install", ...result }));
+      }
+    }
+
     this.generateInstructionFiles();
   }
 
   private generateInstructionFiles(): void {
     const skills = this.loadSkills();
 
+    // User-configured rules from citio.yaml, falling back to the defaults.
+    const configuredRules = this.config.workspace?.rules ?? [];
+    const rules = configuredRules.length > 0 ? configuredRules : [
+      "Always create PRs for code changes. Never push directly to main.",
+      "When investigating bugs, check logs first before making code changes.",
+      "Report findings back to the team with clear summaries.",
+    ];
+
     const baseInstructionContent = `# Citio Agent Instructions
 
 ## Rules
-- Always create PRs for code changes. Never push directly to main.
-- When investigating bugs, check logs first before making code changes.
-- Report findings back to the team with clear summaries.
+${rules.map((rule) => `- ${rule}`).join("\n")}
 - After any update or change pushed to a PR, always quote the PR link in your response.
 
 ## Available MCP Tools
