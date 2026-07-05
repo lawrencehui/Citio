@@ -63,7 +63,16 @@ export async function statusCommand(): Promise<void> {
     return;
   }
   const service = JSON.parse(serviceJson) as { status: string; running: number; pending: number; desired: number; image: string };
-  const healthy = service.status === "ACTIVE" && service.running >= service.desired && service.desired > 0;
+
+  // INACTIVE/DRAINING = a deleted service's tombstone — showing its stale events
+  // and stopped-task reasons only misleads. Treat as not deployed.
+  if (service.status !== "ACTIVE") {
+    p.log.info(`The previous service was deleted (status: ${service.status}).`);
+    p.outro("Nothing is deployed. Run the installer (npx citio / npm run init) to deploy fresh.");
+    return;
+  }
+
+  const healthy = service.running >= service.desired && service.desired > 0;
   const stateLine = `service: ${service.status} · running ${service.running}/${service.desired}${service.pending ? ` (${service.pending} pending)` : ""}`;
   if (healthy) p.log.success(stateLine); else p.log.warn(stateLine);
   p.log.info(`task definition: ${service.image.split("/").pop()}`);
