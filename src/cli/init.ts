@@ -17,6 +17,7 @@ import {
   validateSlackConfigToken,
 } from "../utils/slack-onboarding.js";
 import { SKILL_REGISTRY, installSkillsTo } from "../core/skills.js";
+import { destroyCommand, statusCommand } from "./ops.js";
 
 interface InitConfig {
   provider: "codex" | "claude";
@@ -1697,7 +1698,18 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
+// Subcommand dispatch: `citio` = install wizard · `citio status` · `citio destroy`
+const subcommand = process.argv[2];
+const entry =
+  subcommand === "status" ? statusCommand :
+  subcommand === "destroy" ? destroyCommand :
+  subcommand === undefined ? main :
+  async () => {
+    console.error(`Unknown command "${subcommand}". Usage: citio [status|destroy]`);
+    process.exit(1);
+  };
+
+entry().catch((err) => {
   console.error("Error:", err);
   process.exit(1);
 });
