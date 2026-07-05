@@ -312,6 +312,11 @@ async function promptSlackTokensManually(savedState: Awaited<ReturnType<typeof l
 
   const openedCreate = openBrowser("https://api.slack.com/apps?new_app=1");
   p.note(
+    "STEP 0 — Make sure you're signed in to Slack in your browser\n" +
+    "  • If the workspace dropdown in the next step is EMPTY, you're not\n" +
+    "    signed in — go to https://slack.com/signin, sign in to your\n" +
+    "    workspace, then reload the create-app page\n" +
+    "\n" +
     `STEP 1 — Create the app (${openedCreate ? "a browser window just opened" : "open https://api.slack.com/apps?new_app=1"})\n` +
     "  • Choose “From a manifest” → pick your workspace → Next\n" +
     "  • Select the JSON tab, paste the manifest, → Next → Create\n" +
@@ -389,6 +394,8 @@ async function collectSlackTokens(savedState: Awaited<ReturnType<typeof loadSave
     "Citio will create the Slack app and configure every scope for you.\n" +
     "It needs a one-time “app configuration token” from Slack:\n" +
     "\n" +
+    "  0. Sign in to Slack in your browser first (https://slack.com/signin)\n" +
+    "     — the token generator only lists workspaces you're signed in to\n" +
     `  1. ${openedAppsPage ? "In the browser window that just opened" : "Open https://api.slack.com/apps"},\n` +
     "     scroll to the bottom section “Your App Configuration Tokens”\n" +
     "  2. Click “Generate Token” and pick the workspace Citio should join\n" +
