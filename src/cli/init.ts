@@ -345,7 +345,8 @@ async function promptSlackTokensManually(savedState: Awaited<ReturnType<typeof l
     "    replace whatever placeholder JSON Slack shows) → Next → Create\n" +
     "\n" +
     "STEP 2 — Install it\n" +
-    "  • On the app page: “Install App” (left sidebar) → “Install to Workspace” → Allow\n" +
+    "  • On the app page: “Install App” (left sidebar) →
+    the green “Install to <your workspace>” button → review → Allow\n" +
     "\n" +
     "STEP 3 — Copy the Bot Token (xoxb-…)\n" +
     "  • Left sidebar → “OAuth & Permissions”\n" +
