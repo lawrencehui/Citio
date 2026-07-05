@@ -725,22 +725,55 @@ async function collectConfig(): Promise<InitConfig> {
     }));
   }
 
-  // Rules
-  const rulesInput = (await p.text({
-    message: savedState.rules.length > 0
-      ? "Agent rules (one per line, press Enter to keep saved value):"
-      : "Agent rules (one per line, or press Enter for defaults):",
-    placeholder: "Always create PRs. Never push to main.",
-    defaultValue: savedState.rules.length > 0
-      ? savedState.rules.join("\n")
-      : "Always create PRs for code changes. Never push directly to main.\nWhen investigating bugs, check logs first before making code changes.\nReport findings back to the team with clear summaries.",
-    initialValue: savedState.rules.length > 0
-      ? savedState.rules.join("\n")
-      : undefined,
-  })) as string;
-  if (p.isCancel(rulesInput)) process.exit(0);
+  // Rules — behaviour guardrails injected into every task prompt the agent runs.
+  const DEFAULT_RULES = [
+    "Always create PRs for code changes. Never push directly to main.",
+    "When investigating bugs, check logs first before making code changes.",
+    "Report findings back to the team with clear summaries.",
+  ];
+  const startingRules = savedState.rules.length > 0 ? savedState.rules : DEFAULT_RULES;
 
-  const rules = rulesInput.split("\n").filter((r) => r.trim());
+  p.note(
+    "Rules are plain-English guardrails the agent must follow on every\n" +
+    "task — they're included in each prompt it receives. Current rules:\n" +
+    "\n" +
+    startingRules.map((rule, i) => `  ${i + 1}. ${rule}`).join("\n"),
+    savedState.rules.length > 0 ? "Agent rules (saved)" : "Agent rules (defaults)"
+  );
+
+  const rulesChoice = (await p.select({
+    message: "How do you want to set the agent rules?",
+    options: [
+      {
+        value: "keep",
+        label: savedState.rules.length > 0 ? "Keep my saved rules" : "Use the defaults (recommended)",
+        hint: "you can edit citio.yaml later",
+      },
+      { value: "add", label: "Keep them and add more", hint: "entered one at a time" },
+      { value: "replace", label: "Write my own from scratch", hint: "entered one at a time" },
+    ],
+  })) as "keep" | "add" | "replace";
+  if (p.isCancel(rulesChoice)) process.exit(0);
+
+  let rules = [...startingRules];
+  if (rulesChoice !== "keep") {
+    if (rulesChoice === "replace") rules = [];
+    for (;;) {
+      const rule = (await p.text({
+        message: `Rule ${rules.length + 1} (press Enter on an empty line to finish):`,
+        placeholder: rules.length === 0 ? "Always create PRs. Never push to main." : "",
+      })) as string;
+      if (p.isCancel(rule)) process.exit(0);
+      const trimmed = (rule || "").trim();
+      if (!trimmed) break;
+      rules.push(trimmed);
+      p.log.success(`Added: “${trimmed}”`);
+    }
+    if (rules.length === 0) {
+      p.log.info("No rules entered — using the defaults.");
+      rules = [...DEFAULT_RULES];
+    }
+  }
 
   // Skills
   const skillChoices = (await p.multiselect({

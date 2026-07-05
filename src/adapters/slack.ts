@@ -444,6 +444,15 @@ export class SlackAdapter {
       `If you want to send a structured progress update, call post_update with thread_key=\"${threadKey}\".`,
     ];
 
+    // Team rules from citio.yaml — the user's behaviour guardrails for the agent.
+    const teamRules = this.config.workspace?.rules ?? [];
+    if (teamRules.length > 0) {
+      parts.push(
+        "Team rules — follow these on every task:\n" +
+        teamRules.map((rule) => `- ${rule}`).join("\n")
+      );
+    }
+
     if (contextInfo) {
       parts.push(contextInfo);
     }
