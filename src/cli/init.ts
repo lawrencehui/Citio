@@ -567,29 +567,18 @@ async function collectConfig(): Promise<InitConfig> {
       } else {
         claudeOauthToken = await ensurePortableClaudeAuth(homeDir);
       }
-    } else if (existsSync(authPath)) {
-      p.log.success(
-        `Found existing ${provider === "codex" ? "Codex" : "Claude Code"} credentials at ${authPath}. ` +
-        `These will be uploaded to EFS during deploy.`
-      );
     } else {
-      // No local credentials — run auth locally (user has a TTY here)
-      p.log.info(
-        provider === "codex"
-          ? "No Codex credentials found. Running device auth now..."
-          : "No Claude Code credentials found. Running login now..."
+      // Codex: the CONTAINER authenticates itself during deploy (device auth),
+      // owning its own OAuth token family. No local login is needed or used —
+      // sharing the laptop's auth.json caused single-use refresh-token races.
+      void authPath;
+      p.note(
+        "Codex will sign in INSIDE the container during deploy:\n" +
+        "the deploy output will show an OpenAI device-auth URL + code —\n" +
+        "open it in your browser and approve (uses your ChatGPT Plus/Pro login).\n" +
+        "The container keeps its own credentials on EFS from then on.",
+        "Codex authentication"
       );
-      try {
-        if (provider === "codex") {
-          execSync("codex login --device-auth", { stdio: "inherit", timeout: 300000 });
-        } else {
-          claudeOauthToken = await ensurePortableClaudeAuth(homeDir);
-        }
-        p.log.success("Authenticated! Credentials will be uploaded to EFS during deploy.");
-      } catch {
-        p.log.error("Auth failed. You can re-run `citio` later to try again.");
-        process.exit(1);
-      }
     }
   } else {
     providerApiKey = await reuseOrPromptSecret({
@@ -984,25 +973,26 @@ function startCodexAuthSetupTask(params: {
   efsFileSystemId: string;
   subnetId: string;
   securityGroupId: string;
-  mode: "upload_local_auth" | "device_auth";
-  localAuthJson?: string;
+  mode: "efs_init" | "device_auth";
 }): { taskArn: string; taskId: string; logStream: string } {
   const containerName = params.mode === "device_auth" ? "codex-auth" : "auth-setup";
+  // efs_init: a fresh EFS filesystem's root dir is root-owned and mounts OVER
+  // /home/citio, shadowing the image's ownership — without this prep the runtime
+  // user (citio = uid 1001; node:22-slim ships "node" at 1000) gets EACCES on
+  // auth.json and crashes on mkdir /home/citio/workspace (verified in prod).
+  // Runs unconditionally for every EFS deploy, both providers.
+  //
+  // device_auth: runs `codex login --device-auth` INSIDE the container as the
+  // runtime user, so the container owns its own OAuth token family. (The old
+  // "upload local auth.json" path was removed: OpenAI refresh tokens are
+  // single-use, so a copied family meant the laptop and container raced to
+  // refresh the same token — refresh_token_reused corruption, verified in prod.)
   const command = params.mode === "device_auth"
     ? "mkdir -p /home/citio/.codex && codex login --device-auth"
-    : `mkdir -p /home/citio/.codex /home/citio/workspace && echo '${Buffer.from(params.localAuthJson || "", "utf-8").toString("base64")}' | base64 -d > /home/citio/.codex/auth.json && chmod 600 /home/citio/.codex/auth.json && chown -R 1001:1001 /home/citio && echo AUTH_OK`;
-    // chown -R 1001:1001 /home/citio — a fresh EFS filesystem's root dir is owned
-    // by root, and it mounts OVER /home/citio, shadowing the image's ownership.
-    // This task runs as root (alpine); the runtime runs as "citio". node:22-slim
-    // ships a "node" user at uid 1000, so useradd gives citio uid 1001. Without
-    // prepping the WHOLE home dir the agent gets EACCES on auth.json AND crashes
-    // on mkdir /home/citio/workspace (both verified in prod, 2026-07-05).
-    // TODO: claude-provider + EFS deploys skip this task and still hit the mkdir
-    // crash — replace with an unconditional efs-init task or an EFS Access Point
-    // with posixUser 1001 before launch.
+    : "mkdir -p /home/citio/.codex /home/citio/workspace && chown -R 1001:1001 /home/citio && echo EFS_INIT_OK";
 
   const taskDef = JSON.stringify({
-    family: params.mode === "device_auth" ? "citio-codex-auth" : "citio-auth-setup",
+    family: params.mode === "device_auth" ? "citio-codex-auth" : "citio-efs-init",
     networkMode: "awsvpc",
     requiresCompatibilities: ["FARGATE"],
     cpu: "512",
@@ -1045,7 +1035,7 @@ function startCodexAuthSetupTask(params: {
     { encoding: "utf-8", stdio: "pipe" }
   ).trim();
   const taskArn = execSync(
-    `aws ecs run-task --cluster citio --task-definition "${params.mode === "device_auth" ? "citio-codex-auth" : "citio-auth-setup"}:${revision}" --launch-type FARGATE --network-configuration "awsvpcConfiguration={subnets=[${params.subnetId}],securityGroups=[${params.securityGroupId}],assignPublicIp=ENABLED}" --region ${params.region} ${params.profileFlag} --query 'tasks[0].taskArn' --output text`,
+    `aws ecs run-task --cluster citio --task-definition "${params.mode === "device_auth" ? "citio-codex-auth" : "citio-efs-init"}:${revision}" --launch-type FARGATE --network-configuration "awsvpcConfiguration={subnets=[${params.subnetId}],securityGroups=[${params.securityGroupId}],assignPublicIp=ENABLED}" --region ${params.region} ${params.profileFlag} --query 'tasks[0].taskArn' --output text`,
     { encoding: "utf-8", stdio: "pipe" }
   ).trim();
 
@@ -1413,6 +1403,25 @@ async function deployToAws(config: InitConfig): Promise<boolean> {
       process.exit(1);
     }
     s.stop("EFS mount target available");
+
+    // Prep the EFS home dir (ownership + directories) before anything mounts it.
+    s.start("Preparing EFS home directory (permissions)...");
+    const initTask = startCodexAuthSetupTask({
+      accountId,
+      ecrUri,
+      region,
+      profileFlag,
+      efsFileSystemId,
+      subnetId,
+      securityGroupId: sgId,
+      mode: "efs_init",
+    });
+    const initResult = waitForTaskStop(initTask.taskArn, region, profileFlag, 18, 10);
+    if (initResult.exitCode === "0") {
+      s.stop("EFS home directory ready.");
+    } else {
+      s.stop("EFS home prep did not confirm — the service may crash-loop on permissions; check the auth-setup log stream.");
+    }
   }
 
   // 9. Create/update ECS service
@@ -1447,58 +1456,15 @@ async function deployToAws(config: InitConfig): Promise<boolean> {
 
   p.log.success("ECS service deployed!");
 
-  // Post-deploy: seed Codex OAuth on EFS so the running container can refresh it from there.
+  // Post-deploy: the container authenticates ITSELF via device auth, so it owns
+  // its own OAuth token family. (Uploading the laptop's auth.json was removed —
+  // single-use refresh tokens made the two machines race and corrupt the family.)
   if (config.authMethod === "oauth" && config.provider === "codex") {
-    const homeDir = process.env.HOME || "";
-    const localAuthPath = `${homeDir}/.codex/auth.json`;
-    const hasLocalAuth = existsSync(localAuthPath);
-    const setupMode = hasLocalAuth
-      ? (await p.select({
-          message: "How should Codex OAuth be bootstrapped on ECS?",
-          options: [
-            {
-              value: "upload_local_auth",
-              label: "Reuse local Codex login (recommended)",
-              hint: "Uploads ~/.codex/auth.json to EFS so ECS can refresh it there",
-            },
-            {
-              value: "device_auth",
-              label: "Authenticate inside ECS with device auth",
-              hint: "No local auth copy; complete the OpenAI device flow from the task logs",
-            },
-          ],
-          initialValue: "upload_local_auth",
-        })) as "upload_local_auth" | "device_auth"
-      : "device_auth";
-
-    if (p.isCancel(setupMode)) process.exit(0);
-
     try {
       const { subnetId, securityGroupId } = getServiceNetworkConfig(region, profileFlag);
       let authBootstrapped = false;
 
-      if (setupMode === "upload_local_auth") {
-        s.start("Uploading local Codex credentials to EFS...");
-        const authTask = startCodexAuthSetupTask({
-          accountId,
-          ecrUri,
-          region,
-          profileFlag,
-          efsFileSystemId,
-          subnetId,
-          securityGroupId,
-          mode: "upload_local_auth",
-          localAuthJson: readFileSync(localAuthPath, "utf-8"),
-        });
-        const { exitCode } = waitForTaskStop(authTask.taskArn, region, profileFlag, 12, 10);
-        if (exitCode === "0") {
-          s.stop("Codex credentials uploaded to EFS.");
-          authBootstrapped = true;
-        } else {
-          s.stop("Codex credential upload failed.");
-          p.log.warn("Falling back to in-container device auth may be required.");
-        }
-      } else {
+      {
         s.start("Starting Codex device auth task...");
         const authTask = startCodexAuthSetupTask({
           accountId,
