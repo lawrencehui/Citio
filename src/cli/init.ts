@@ -1425,6 +1425,8 @@ async function deployToAws(config: InitConfig): Promise<boolean> {
         --task-definition citio \
         --desired-count 1 \
         --launch-type FARGATE \
+        --availability-zone-rebalancing DISABLED \
+        --deployment-configuration "maximumPercent=100,minimumHealthyPercent=0" \
         --network-configuration "awsvpcConfiguration={subnets=[${subnetId}],securityGroups=[${sgId}],assignPublicIp=ENABLED}" \
         --region ${region} ${profileFlag}`,
       "Failed to create the ECS service."

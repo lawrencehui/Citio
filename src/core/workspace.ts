@@ -212,20 +212,33 @@ You have access to these tools via the MCP server:
     if (!existsSync(skillsDir)) return "";
 
     const entries = readdirSync(skillsDir, { withFileTypes: true });
-    const skillContents: string[] = [];
+    const index: string[] = [];
 
     for (const entry of entries) {
-      if (entry.isDirectory()) {
-        const skillPath = path.join(skillsDir, entry.name, "SKILL.md");
-        if (existsSync(skillPath)) {
-          const content = readFileSync(skillPath, "utf-8");
-          skillContents.push(`## Skill: ${entry.name}\n\n${content}`);
-        }
+      if (!entry.isDirectory()) continue;
+      const skillPath = path.join(skillsDir, entry.name, "SKILL.md");
+      if (!existsSync(skillPath)) continue;
+
+      // Progressive disclosure: inlining full SKILL.md bodies added ~60KB to
+      // EVERY agent request (verified: multi-minute responses). Give the agent
+      // a one-line index and let it read the file when the task matches.
+      const content = readFileSync(skillPath, "utf-8");
+      let description = "";
+      const fmMatch = content.match(/^---\n[\s\S]*?\bdescription:\s*(.+)/m);
+      if (fmMatch) description = fmMatch[1].trim().replace(/^["']|["']$/g, "");
+      if (!description) {
+        const body = content.replace(/^---\n[\s\S]*?\n---\n?/, "");
+        description = (body.split("\n").find((line) => line.trim() && !line.trim().startsWith("#")) || "").trim().slice(0, 200);
       }
+      index.push(`- **${entry.name}** — ${description}\n  Full instructions: read \`${skillPath}\``);
     }
 
-    if (skillContents.length === 0) return "";
-    return `\n# Installed Skills\n\n${skillContents.join("\n\n---\n\n")}`;
+    if (index.length === 0) return "";
+    return (
+      `\n# Installed Skills\n\n` +
+      `These skills are installed on disk. When a task matches one, READ its SKILL.md (path below) and follow it — do not guess its contents:\n\n` +
+      index.join("\n")
+    );
   }
 
   private extractRepoName(url: string): string {
