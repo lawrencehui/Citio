@@ -81,6 +81,11 @@ export function buildCitioSlackManifest(options: SlackManifestOptions = {}): Rec
         bot_events: [
           "app_mention",
           "message.im",
+          // Required by the Assistant view (adapters/slack.ts uses Bolt's Assistant):
+          // without these, Socket Mode never delivers assistant-thread events and
+          // the assistant pane silently does nothing.
+          "assistant_thread_started",
+          "assistant_thread_context_changed",
         ],
       },
       interactivity: {
