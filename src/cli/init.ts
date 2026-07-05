@@ -989,7 +989,11 @@ function startCodexAuthSetupTask(params: {
   const containerName = params.mode === "device_auth" ? "codex-auth" : "auth-setup";
   const command = params.mode === "device_auth"
     ? "mkdir -p /home/citio/.codex && codex login --device-auth"
-    : `mkdir -p /home/citio/.codex && echo '${Buffer.from(params.localAuthJson || "", "utf-8").toString("base64")}' | base64 -d > /home/citio/.codex/auth.json && chmod 600 /home/citio/.codex/auth.json && echo AUTH_OK`;
+    : `mkdir -p /home/citio/.codex && echo '${Buffer.from(params.localAuthJson || "", "utf-8").toString("base64")}' | base64 -d > /home/citio/.codex/auth.json && chmod 600 /home/citio/.codex/auth.json && chown -R 1001:1001 /home/citio/.codex && echo AUTH_OK`;
+    // chown 1001:1001 — this task runs as root (alpine) but the runtime container
+    // runs as the non-root "citio" user. Base image node:22-slim ships a "node"
+    // user at uid 1000, so useradd gives citio uid 1001. Without the chown the
+    // agent gets EACCES on its own auth file (verified in prod, 2026-07-05).
 
   const taskDef = JSON.stringify({
     family: params.mode === "device_auth" ? "citio-codex-auth" : "citio-auth-setup",
@@ -1069,7 +1073,7 @@ function installSkills(skills: string[], githubToken: string): void {
   }
 }
 
-async function deployToAws(config: InitConfig): Promise<void> {
+async function deployToAws(config: InitConfig): Promise<boolean> {
   const s = p.spinner();
   const profileFlag = config.awsProfile
     ? `--profile ${config.awsProfile}`
@@ -1339,6 +1343,48 @@ async function deployToAws(config: InitConfig): Promise<void> {
   }
   s.stop("Networking configured");
 
+  // 8b. EFS is unreachable without a mount target in the task's subnet — every
+  // task dies with ResourceInitializationError ("Failed to resolve fs-....efs...").
+  if (efsFileSystemId) {
+    s.start("Ensuring EFS mount target in the task subnet...");
+    try {
+      execSync(
+        `aws ec2 authorize-security-group-ingress --group-id ${sgId} --protocol tcp --port 2049 --source-group ${sgId} --region ${region} ${profileFlag}`,
+        { encoding: "utf-8", stdio: "pipe" }
+      );
+    } catch {
+      // Duplicate rule — already allowed.
+    }
+
+    const existingState = runDeployCommand(
+      `aws efs describe-mount-targets --file-system-id ${efsFileSystemId} --region ${region} ${profileFlag} --query "MountTargets[?SubnetId=='${subnetId}'].LifeCycleState" --output text`,
+      "Failed to inspect EFS mount targets."
+    ).trim();
+
+    if (!existingState || existingState === "None") {
+      runDeployCommand(
+        `aws efs create-mount-target --file-system-id ${efsFileSystemId} --subnet-id ${subnetId} --security-groups ${sgId} --region ${region} ${profileFlag}`,
+        "Failed to create the EFS mount target."
+      );
+    }
+
+    // Tasks launched before the mount target is 'available' still fail — wait for it.
+    let mountTargetReady = existingState === "available";
+    for (let attempt = 0; attempt < 30 && !mountTargetReady; attempt++) {
+      sleep(10);
+      const state = runDeployCommand(
+        `aws efs describe-mount-targets --file-system-id ${efsFileSystemId} --region ${region} ${profileFlag} --query "MountTargets[?SubnetId=='${subnetId}'].LifeCycleState" --output text`,
+        "Failed to poll the EFS mount target."
+      ).trim();
+      mountTargetReady = state === "available";
+    }
+    if (!mountTargetReady) {
+      p.log.error("EFS mount target did not become available within 5 minutes. Re-run the installer once it is (aws efs describe-mount-targets).");
+      process.exit(1);
+    }
+    s.stop("EFS mount target available");
+  }
+
   // 9. Create/update ECS service
   s.start("Deploying ECS service...");
   try {
@@ -1538,6 +1584,7 @@ async function deployToAws(config: InitConfig): Promise<void> {
     `\nLogs:     aws logs tail /ecs/citio --region ${region} ${profileFlag} --follow` +
     `\nHealth:   Check the task's public IP on port 3001/healthz`
   );
+  return serviceHealthy;
 }
 
 async function main(): Promise<void> {
@@ -1605,14 +1652,22 @@ async function main(): Promise<void> {
   if (p.isCancel(shouldDeploy)) process.exit(0);
 
   if (shouldDeploy) {
-    await deployToAws(config);
+    const healthy = await deployToAws(config);
+    if (healthy) {
+      p.outro("Citio is ready! Send a message in your Slack channel to test.");
+    } else {
+      p.outro(
+        "Deployment started, but the service is NOT confirmed healthy yet.\n" +
+        "   Watch the logs above; when the task shows RUNNING, test it in Slack.\n" +
+        "   If it keeps failing, fix the reported error and re-run the installer — your answers are saved."
+      );
+    }
   } else {
     p.log.info(
       "Skipping deploy. Secrets are stored outside the repo now, so local docker runs need explicit env vars or provider auth mounts."
     );
+    p.outro("Configuration saved. Re-run and choose deploy when you're ready.");
   }
-
-  p.outro("Citio is ready! Send a message in your Slack channel to test.");
 }
 
 main().catch((err) => {
