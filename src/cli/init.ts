@@ -989,11 +989,16 @@ function startCodexAuthSetupTask(params: {
   const containerName = params.mode === "device_auth" ? "codex-auth" : "auth-setup";
   const command = params.mode === "device_auth"
     ? "mkdir -p /home/citio/.codex && codex login --device-auth"
-    : `mkdir -p /home/citio/.codex && echo '${Buffer.from(params.localAuthJson || "", "utf-8").toString("base64")}' | base64 -d > /home/citio/.codex/auth.json && chmod 600 /home/citio/.codex/auth.json && chown -R 1001:1001 /home/citio/.codex && echo AUTH_OK`;
-    // chown 1001:1001 — this task runs as root (alpine) but the runtime container
-    // runs as the non-root "citio" user. Base image node:22-slim ships a "node"
-    // user at uid 1000, so useradd gives citio uid 1001. Without the chown the
-    // agent gets EACCES on its own auth file (verified in prod, 2026-07-05).
+    : `mkdir -p /home/citio/.codex /home/citio/workspace && echo '${Buffer.from(params.localAuthJson || "", "utf-8").toString("base64")}' | base64 -d > /home/citio/.codex/auth.json && chmod 600 /home/citio/.codex/auth.json && chown -R 1001:1001 /home/citio && echo AUTH_OK`;
+    // chown -R 1001:1001 /home/citio — a fresh EFS filesystem's root dir is owned
+    // by root, and it mounts OVER /home/citio, shadowing the image's ownership.
+    // This task runs as root (alpine); the runtime runs as "citio". node:22-slim
+    // ships a "node" user at uid 1000, so useradd gives citio uid 1001. Without
+    // prepping the WHOLE home dir the agent gets EACCES on auth.json AND crashes
+    // on mkdir /home/citio/workspace (both verified in prod, 2026-07-05).
+    // TODO: claude-provider + EFS deploys skip this task and still hit the mkdir
+    // crash — replace with an unconditional efs-init task or an EFS Access Point
+    // with posixUser 1001 before launch.
 
   const taskDef = JSON.stringify({
     family: params.mode === "device_auth" ? "citio-codex-auth" : "citio-auth-setup",
