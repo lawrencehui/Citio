@@ -94,6 +94,25 @@ function resolveEfsFileSystemId(region: string, profileFlag: string, createdEfsI
   return discovered;
 }
 
+const PREREQ_GUIDES: Record<string, string> = {
+  docker:
+    "docker — runs the container build\n" +
+    "    macOS/Windows: install Docker Desktop → https://www.docker.com/products/docker-desktop/\n" +
+    "    Linux:         curl -fsSL https://get.docker.com | sh\n" +
+    "    (then make sure Docker is RUNNING before re-running the installer)",
+  "aws-cli":
+    "aws — deploys to your AWS account\n" +
+    "    macOS:         brew install awscli\n" +
+    "    Ubuntu/Debian: sudo apt install awscli\n" +
+    "    Windows:       https://awscli.amazonaws.com/AWSCLIV2.msi\n" +
+    "    Full account + permissions guide: docs/AWS_SETUP.md",
+  git:
+    "git — clones your repos\n" +
+    "    macOS:         xcode-select --install   (or: brew install git)\n" +
+    "    Ubuntu/Debian: sudo apt install git\n" +
+    "    Windows:       https://git-scm.com/download/win",
+};
+
 function checkPrerequisites(): void {
   const missing: string[] = [];
 
@@ -116,10 +135,62 @@ function checkPrerequisites(): void {
   }
 
   if (missing.length > 0) {
-    p.log.error(
-      `Missing prerequisites: ${missing.join(", ")}. Please install them first.`
+    p.note(
+      missing.map((tool) => `  ${PREREQ_GUIDES[tool] || tool}`).join("\n\n"),
+      `Missing ${missing.length === 1 ? "prerequisite" : "prerequisites"}: ${missing.join(", ")}`
     );
+    p.log.error("Install the tools above, then re-run the installer — your answers so far are saved.");
     process.exit(1);
+  }
+}
+
+async function ensureAwsCredentials(awsProfile: string): Promise<void> {
+  const profileFlag = awsProfile && awsProfile !== "default" ? `--profile ${awsProfile}` : "";
+
+  for (;;) {
+    try {
+      const identityJson = execSync(`aws sts get-caller-identity --output json ${profileFlag}`, {
+        encoding: "utf-8",
+        stdio: "pipe",
+        timeout: 20000,
+      });
+      const identity = JSON.parse(identityJson) as { Account?: string; Arn?: string };
+      p.log.success(
+        `AWS credentials verified — deploying to account ${identity.Account}` +
+        (identity.Arn ? ` as ${identity.Arn.split("/").pop()}` : "") + "."
+      );
+      return;
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      const looksExpired = /expired|sso/i.test(detail);
+
+      p.note(
+        (looksExpired
+          ? `Your session looks expired. If you use SSO:\n` +
+            `    aws sso login${awsProfile && awsProfile !== "default" ? ` --profile ${awsProfile}` : ""}\n\n`
+          : "") +
+        "The AWS CLI can't authenticate with this profile. To set it up:\n" +
+        "\n" +
+        "  1. Get an access key: AWS Console → IAM → Users → your user →\n" +
+        "     Security credentials → “Create access key” (choose CLI)\n" +
+        "  2. Run:  aws configure" + (awsProfile && awsProfile !== "default" ? ` --profile ${awsProfile}` : "") + "\n" +
+        "     and paste the key, secret, and a region (e.g. us-east-1)\n" +
+        "  3. Verify:  aws sts get-caller-identity\n" +
+        "\n" +
+        "Permissions needed + least-privilege policy: docs/AWS_SETUP.md\n" +
+        "(simplest for a personal account: AdministratorAccess)",
+        `AWS credentials check failed${awsProfile ? ` (profile: ${awsProfile})` : ""}`
+      );
+
+      const retry = (await p.confirm({
+        message: "Configured it in another terminal? Check again:",
+        initialValue: true,
+      })) as boolean;
+      if (p.isCancel(retry) || !retry) {
+        p.log.error("AWS credentials are required to deploy. Re-run the installer once they're set up — your answers are saved.");
+        process.exit(1);
+      }
+    }
   }
 }
 
@@ -691,6 +762,9 @@ async function collectConfig(): Promise<InitConfig> {
   } catch {
     awsProfile = "default";
   }
+
+  // Fail fast on credentials — better here than 10 minutes into the Docker build.
+  await ensureAwsCredentials(awsProfile);
 
   const efsRequiredForCodex = provider === "codex" && authMethod === "oauth";
   const enableEfs = (await p.confirm({
@@ -1454,7 +1528,8 @@ async function main(): Promise<void> {
     "\n" +
     "  ✓ A Slack workspace where you can create an app\n" +
     "  ✓ A GitHub account (we'll create a token together)\n" +
-    "  ✓ An AWS account with the CLI logged in (aws sts get-caller-identity)\n" +
+    "  ✓ An AWS account + CLI (no CLI or unsure about permissions?\n" +
+    "    see docs/AWS_SETUP.md — we also verify before deploying)\n" +
     "  ✓ A Claude Max/Pro or ChatGPT Plus login for the agent\n" +
     "\n" +
     "Your answers are saved as you go — if anything fails, re-run\n" +

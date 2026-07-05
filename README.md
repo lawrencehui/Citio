@@ -104,7 +104,7 @@ More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 | ---- | -------------- |
 | **Node.js** | ≥ 22 |
 | **Docker** | Running. The image is built `linux/amd64` — on Apple Silicon, Docker Desktop's buildx cross-builds it. |
-| **AWS CLI** | v2, authenticated (`aws configure` or `aws sso login`) with a profile that has the permissions below. |
+| **AWS CLI** | v2, authenticated (`aws configure` or `aws sso login`) with a profile that has the permissions below. New to AWS or unsure about permissions? **[docs/AWS_SETUP.md](docs/AWS_SETUP.md)** walks through account, CLI, credentials, a least-privilege IAM policy, costs, and teardown. |
 | **Git** | Any recent version. |
 
 > The agent CLIs (`claude`, `codex`), `gh`, and `jq` ship **inside the container image** — you don't install them on the host.
