@@ -12,3 +12,4 @@ citio.yaml
 # Local machine state
 .claude/settings.local.json
 *.local.md
+slack-app-manifest.json

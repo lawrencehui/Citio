@@ -8,6 +8,7 @@ import { stringify } from "yaml";
 import { extractClaudeOauthTokenFromTranscript, normalizeClaudeOauthToken, validateClaudeOauthToken } from "../utils/claude.js";
 import { loadSavedInstallerState, saveInstallerState } from "../utils/installer-state.js";
 import {
+  buildCitioSlackManifest,
   createCitioSlackApp,
   openBrowser,
   validateSlackAppToken,
@@ -200,23 +201,73 @@ async function reuseOrPromptSecret(options: {
   return value;
 }
 
+function copyToClipboard(text: string): boolean {
+  try {
+    if (process.platform === "darwin") {
+      execSync("pbcopy", { input: text, stdio: ["pipe", "pipe", "pipe"] });
+      return true;
+    }
+    if (process.platform === "linux") {
+      execSync("xclip -selection clipboard", { input: text, stdio: ["pipe", "pipe", "pipe"] });
+      return true;
+    }
+  } catch {
+    // Best-effort only — the manifest is printed either way.
+  }
+  return false;
+}
+
 async function promptSlackTokensManually(savedState: Awaited<ReturnType<typeof loadSavedInstallerState>>): Promise<{ slackBotToken: string; slackAppToken: string }> {
-  p.log.info(
-    "Manual Slack setup:\n" +
-    "1. Create or open your app at https://api.slack.com/apps\n" +
-    "2. Enable Socket Mode\n" +
-    "3. Install the app to your workspace\n" +
-    "4. Copy the Bot Token (xoxb-...) and App Token (xapp-...)"
+  const manifestJson = JSON.stringify(buildCitioSlackManifest(), null, 2);
+  const manifestPath = path.join(process.cwd(), "slack-app-manifest.json");
+  writeFileSync(manifestPath, manifestJson + "\n");
+  const copied = copyToClipboard(manifestJson);
+
+  p.note(
+    "You'll create the Slack app by pasting a ready-made manifest —\n" +
+    "no scope-hunting needed. The manifest sets every permission,\n" +
+    "event subscription, and Socket Mode for you.",
+    "Guided Slack setup (~3 minutes)"
+  );
+
+  if (copied) {
+    p.log.success(`The app manifest is on your clipboard (also saved to ${manifestPath}).`);
+  } else {
+    p.log.info(`The app manifest is saved to ${manifestPath} — copy its contents, or copy the block below:`);
+    console.log("–––––––––––––––––––––––––––––––––––––––––––––");
+    console.log(manifestJson);
+    console.log("–––––––––––––––––––––––––––––––––––––––––––––");
+  }
+
+  const openedCreate = openBrowser("https://api.slack.com/apps?new_app=1");
+  p.note(
+    `STEP 1 — Create the app (${openedCreate ? "a browser window just opened" : "open https://api.slack.com/apps?new_app=1"})\n` +
+    "  • Choose “From a manifest” → pick your workspace → Next\n" +
+    "  • Select the JSON tab, paste the manifest, → Next → Create\n" +
+    "\n" +
+    "STEP 2 — Install it\n" +
+    "  • On the app page: “Install App” (left sidebar) → “Install to Workspace” → Allow\n" +
+    "\n" +
+    "STEP 3 — Copy the Bot Token (xoxb-…)\n" +
+    "  • Left sidebar → “OAuth & Permissions”\n" +
+    "  • Copy “Bot User OAuth Token” — it starts with xoxb-\n" +
+    "\n" +
+    "STEP 4 — Create + copy the App Token (xapp-…)\n" +
+    "  • Left sidebar → “Basic Information” → scroll to “App-Level Tokens”\n" +
+    "  • “Generate Token and Scopes” → name it citio-socket\n" +
+    "  • “Add Scope” → connections:write → Generate\n" +
+    "  • Copy the token — it starts with xapp-",
+    "Slack app — 4 steps"
   );
 
   const slackBotToken = await reuseOrPromptSecret({
-    message: "Slack Bot Token (xoxb-...):",
+    message: "Paste the Bot Token (xoxb-…) from OAuth & Permissions:",
     existingValue: savedState.slackBotToken,
     validate: validateSlackBotToken,
   });
 
   const slackAppToken = await reuseOrPromptSecret({
-    message: "Slack App Token (xapp-...):",
+    message: "Paste the App Token (xapp-…) from Basic Information → App-Level Tokens:",
     existingValue: savedState.slackAppToken,
     validate: validateSlackAppToken,
   });
@@ -229,7 +280,7 @@ async function collectSlackTokens(savedState: Awaited<ReturnType<typeof loadSave
 
   const setupMode = (await p.select({
     message: "How should Slack be configured?",
-    initialValue: hasSavedTokens ? "reuse" : "automatic",
+    initialValue: hasSavedTokens ? "reuse" : "manual",
     options: [
       ...(hasSavedTokens ? [{
         value: "reuse",
@@ -237,14 +288,14 @@ async function collectSlackTokens(savedState: Awaited<ReturnType<typeof loadSave
         hint: "Keep the previously saved bot and app tokens",
       }] : []),
       {
-        value: "automatic",
-        label: "Automatic app setup (recommended)",
-        hint: "Create the Slack app and scopes from a config token",
+        value: "manual",
+        label: "Guided setup (recommended)",
+        hint: "Paste a ready-made app manifest into Slack — we walk you through every click",
       },
       {
-        value: "manual",
-        label: "Manual token entry",
-        hint: "Paste xoxb and xapp tokens yourself",
+        value: "automatic",
+        label: "Automatic app creation",
+        hint: "Citio creates the app via the Slack API — needs an app configuration token (xoxe…)",
       },
     ],
   })) as "reuse" | "automatic" | "manual";
@@ -262,16 +313,24 @@ async function collectSlackTokens(savedState: Awaited<ReturnType<typeof loadSave
     return promptSlackTokensManually(savedState);
   }
 
-  p.log.info(
-    "Slack setup takes about 2 minutes.\n" +
-    "Citio will create the app and configure the required scopes for you.\n" +
-    "You will still need to finish two browser steps:\n" +
-    "1. Approve the app install in Slack\n" +
-    "2. Create one Socket Mode app token (xapp-...)"
+  const openedAppsPage = openBrowser("https://api.slack.com/apps");
+  p.note(
+    "Citio will create the Slack app and configure every scope for you.\n" +
+    "It needs a one-time “app configuration token” from Slack:\n" +
+    "\n" +
+    `  1. ${openedAppsPage ? "In the browser window that just opened" : "Open https://api.slack.com/apps"},\n` +
+    "     scroll to the bottom section “Your App Configuration Tokens”\n" +
+    "  2. Click “Generate Token” and pick the workspace Citio should join\n" +
+    "  3. Copy the ACCESS token — it starts with xoxe-\n" +
+    "\n" +
+    "(This token only creates the app and expires after 12 hours —\n" +
+    "it is not stored. You'll still approve the install and create one\n" +
+    "Socket Mode token in the browser afterwards.)",
+    "Automatic Slack setup (~2 minutes)"
   );
 
   const configToken = await reuseOrPromptSecret({
-    message: "Slack config token (xoxe...):",
+    message: "Paste the app configuration token (xoxe…):",
     validate: validateSlackConfigToken,
   });
 
@@ -300,22 +359,32 @@ async function collectSlackTokens(savedState: Awaited<ReturnType<typeof loadSave
   const openedAuthUrl = openBrowser(slackApp.oauthAuthorizeUrl);
   const openedSettingsUrl = openBrowser(slackApp.settingsUrl);
 
-  p.log.info(
-    "Browser guide:\n" +
-    `• Approve the Slack install${openedAuthUrl ? " in the browser window that just opened" : ` at ${slackApp.oauthAuthorizeUrl}`}\n` +
-    `• Open the app settings${openedSettingsUrl ? " window" : ` at ${slackApp.settingsUrl}`}\n` +
-    "• In OAuth & Permissions, copy the Bot User OAuth Token (xoxb-...)\n" +
-    "• In Basic Information, create an App-Level Token with the connections:write scope, then copy the xapp-... token"
+  p.note(
+    `STEP 1 — Approve the install${openedAuthUrl ? " (a browser window just opened)" : ""}\n` +
+    (openedAuthUrl ? "" : `  • Open ${slackApp.oauthAuthorizeUrl}\n`) +
+    "  • Click “Allow” to install the app to your workspace\n" +
+    "\n" +
+    `STEP 2 — Copy the Bot Token (xoxb-…)\n` +
+    `  • In the app settings${openedSettingsUrl ? " window that opened" : ` at ${slackApp.settingsUrl}`}:\n` +
+    "  • Left sidebar → “OAuth & Permissions”\n" +
+    "  • Copy “Bot User OAuth Token” — it starts with xoxb-\n" +
+    "\n" +
+    "STEP 3 — Create + copy the App Token (xapp-…)\n" +
+    "  • Left sidebar → “Basic Information” → scroll to “App-Level Tokens”\n" +
+    "  • “Generate Token and Scopes” → name it citio-socket\n" +
+    "  • “Add Scope” → connections:write → Generate\n" +
+    "  • Copy the token — it starts with xapp-",
+    "Finish in the browser — 3 steps"
   );
 
   const slackBotToken = await reuseOrPromptSecret({
-    message: "Slack Bot Token (xoxb-...) from OAuth & Permissions:",
+    message: "Paste the Bot Token (xoxb-…) from OAuth & Permissions:",
     existingValue: savedState.slackBotToken,
     validate: validateSlackBotToken,
   });
 
   const slackAppToken = await reuseOrPromptSecret({
-    message: "Slack App Token (xapp-...) from Basic Information:",
+    message: "Paste the App Token (xapp-…) from Basic Information → App-Level Tokens:",
     existingValue: savedState.slackAppToken,
     validate: validateSlackAppToken,
   });
@@ -433,10 +502,21 @@ async function collectConfig(): Promise<InitConfig> {
   // Slack setup
   const { slackBotToken, slackAppToken } = await collectSlackTokens(savedState);
 
+  p.note(
+    "Pick the channel where Citio should listen for @mentions:\n" +
+    "  1. In Slack, click the channel name at the top of the channel\n" +
+    "  2. Scroll to the bottom of the About tab\n" +
+    "  3. Copy the “Channel ID” — it starts with C\n" +
+    "\n" +
+    "After deploy, run  /invite @citio  in that channel so the bot can see it.\n" +
+    "(DMs to the bot work everywhere — this only scopes channel mentions.)",
+    "Find your Channel ID"
+  );
+
   const slackChannelId = (await p.text({
     message: savedState.slackChannelId
       ? "Slack Channel ID (press Enter to keep saved value):"
-      : "Slack Channel ID (e.g. C0123456789):",
+      : "Slack Channel ID (starts with C):",
     placeholder: "C0123456789",
     defaultValue: savedState.slackChannelId,
     initialValue: savedState.slackChannelId,
@@ -444,12 +524,26 @@ async function collectConfig(): Promise<InitConfig> {
   if (p.isCancel(slackChannelId)) process.exit(0);
 
   // GitHub token
-  p.log.info(
-    "Create a fine-grained GitHub PAT at https://github.com/settings/tokens\nPermissions needed: contents:write, pull_requests:write on your repos."
+  p.note(
+    "Citio uses this to clone your repos and open pull requests.\n" +
+    "\n" +
+    "Fine-grained token (recommended):\n" +
+    "  1. Open https://github.com/settings/personal-access-tokens/new\n" +
+    "  2. “Repository access” → Only select repositories → pick the repos\n" +
+    "     Citio will work on\n" +
+    "  3. “Repository permissions” →\n" +
+    "       • Contents: Read and write\n" +
+    "       • Pull requests: Read and write\n" +
+    "     (Metadata: Read is added automatically)\n" +
+    "  4. Generate token → copy it (starts with github_pat_)\n" +
+    "\n" +
+    "A classic token also works: https://github.com/settings/tokens/new\n" +
+    "with the “repo” scope (starts with ghp_).",
+    "GitHub token — 4 steps"
   );
 
   const githubToken = await reuseOrPromptSecret({
-    message: "GitHub Personal Access Token:",
+    message: "Paste your GitHub Personal Access Token:",
     existingValue: savedState.githubToken,
   });
 
@@ -551,14 +645,24 @@ async function collectConfig(): Promise<InitConfig> {
   })) as string;
   if (p.isCancel(gitUserEmail)) process.exit(0);
 
-  // AWS config
+  // AWS config — default to the region the user's AWS CLI is already set to.
+  let detectedRegion = "";
+  try {
+    detectedRegion = execSync("aws configure get region 2>/dev/null", { encoding: "utf-8", stdio: "pipe" }).trim();
+  } catch {
+    // No configured region — fall back below.
+  }
+  const regionDefault = savedState.awsRegion || detectedRegion || "us-east-1";
+
   const awsRegion = (await p.text({
     message: savedState.awsRegion
       ? "AWS Region (press Enter to keep saved value):"
-      : "AWS Region:",
+      : detectedRegion
+        ? `AWS Region (detected ${detectedRegion} from your AWS CLI — press Enter to accept):`
+        : "AWS Region:",
     placeholder: "us-east-1",
-    defaultValue: savedState.awsRegion || "us-east-1",
-    initialValue: savedState.awsRegion || "us-east-1",
+    defaultValue: regionDefault,
+    initialValue: regionDefault,
   })) as string;
   if (p.isCancel(awsRegion)) process.exit(0);
 
@@ -588,8 +692,11 @@ async function collectConfig(): Promise<InitConfig> {
     awsProfile = "default";
   }
 
+  const efsRequiredForCodex = provider === "codex" && authMethod === "oauth";
   const enableEfs = (await p.confirm({
-    message: "Enable EFS persistence for workspace, memory, and auth? Recommended for repo state across redeploys.",
+    message: efsRequiredForCodex
+      ? "Enable EFS persistence? (REQUIRED for Codex OAuth — it keeps ~/.codex/auth.json across restarts)"
+      : "Enable EFS persistence for workspace, memory, and auth? Recommended for repo state across redeploys.",
     initialValue: savedState.enableEfs ?? true,
   })) as boolean;
   if (p.isCancel(enableEfs)) process.exit(0);
@@ -1340,6 +1447,20 @@ async function deployToAws(config: InitConfig): Promise<void> {
 
 async function main(): Promise<void> {
   p.intro("Welcome to Citio - Autonomous CTO Agent");
+
+  p.note(
+    "Setup takes ~10 minutes and walks you through every credential.\n" +
+    "Have these ready (each step shows exactly where to get them):\n" +
+    "\n" +
+    "  ✓ A Slack workspace where you can create an app\n" +
+    "  ✓ A GitHub account (we'll create a token together)\n" +
+    "  ✓ An AWS account with the CLI logged in (aws sts get-caller-identity)\n" +
+    "  ✓ A Claude Max/Pro or ChatGPT Plus login for the agent\n" +
+    "\n" +
+    "Your answers are saved as you go — if anything fails, re-run\n" +
+    "`npx citio` and it resumes with your saved values.",
+    "Before you start"
+  );
 
   checkPrerequisites();
 
