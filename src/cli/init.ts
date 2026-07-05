@@ -1353,7 +1353,7 @@ async function deployToAws(config: InitConfig): Promise<boolean> {
     try {
       const sgResult = execSync(
         `aws ec2 create-security-group --group-name citio-sg --description "Citio agent - outbound only" --vpc-id ${vpcId} --region ${region} ${profileFlag} --output text --query GroupId`,
-        { encoding: "utf-8" }
+        { encoding: "utf-8", stdio: "pipe" } // pipe stderr: InvalidGroup.Duplicate is expected on redeploys (we fall back to describe)
       ).trim();
       sgId = sgResult;
     } catch {
