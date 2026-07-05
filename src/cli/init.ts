@@ -1349,17 +1349,19 @@ async function deployToAws(config: InitConfig): Promise<boolean> {
       { encoding: "utf-8" }
     ).trim();
 
-    // Create security group
-    try {
-      const sgResult = execSync(
-        `aws ec2 create-security-group --group-name citio-sg --description "Citio agent - outbound only" --vpc-id ${vpcId} --region ${region} ${profileFlag} --output text --query GroupId`,
-        { encoding: "utf-8", stdio: "pipe" } // pipe stderr: InvalidGroup.Duplicate is expected on redeploys (we fall back to describe)
-      ).trim();
-      sgId = sgResult;
-    } catch {
+    // Reuse the security group when it already exists (normal on redeploys);
+    // create it only when missing.
+    const existingSg = execSync(
+      `aws ec2 describe-security-groups --filters "Name=group-name,Values=citio-sg" "Name=vpc-id,Values=${vpcId}" --query "SecurityGroups[0].GroupId" --output text --region ${region} ${profileFlag}`,
+      { encoding: "utf-8", stdio: "pipe" }
+    ).trim();
+
+    if (existingSg && existingSg !== "None") {
+      sgId = existingSg;
+    } else {
       sgId = execSync(
-        `aws ec2 describe-security-groups --filters "Name=group-name,Values=citio-sg" --query "SecurityGroups[0].GroupId" --output text --region ${region} ${profileFlag}`,
-        { encoding: "utf-8" }
+        `aws ec2 create-security-group --group-name citio-sg --description "Citio agent - outbound only" --vpc-id ${vpcId} --region ${region} ${profileFlag} --output text --query GroupId`,
+        { encoding: "utf-8", stdio: "pipe" }
       ).trim();
     }
   } catch (err) {
