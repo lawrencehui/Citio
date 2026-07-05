@@ -219,3 +219,17 @@ export function validateSlackConfigToken(token: string | undefined): string | Er
   }
   return undefined;
 }
+
+/** Live-check a saved bot token via auth.test. Returns workspace/bot identity when valid. */
+export async function testSlackBotToken(token: string): Promise<{ ok: boolean; team?: string; botUser?: string }> {
+  try {
+    const res = await callSlackApi("auth.test", token, {});
+    if (res.ok) {
+      const r = res as unknown as { team?: string; user?: string };
+      return { ok: true, team: r.team, botUser: r.user };
+    }
+    return { ok: false };
+  } catch {
+    return { ok: false };
+  }
+}

@@ -11,6 +11,7 @@ import {
   buildCitioSlackManifest,
   createCitioSlackApp,
   openBrowser,
+  testSlackBotToken,
   validateSlackAppToken,
   validateSlackBotToken,
   validateSlackConfigToken,
@@ -354,24 +355,41 @@ async function promptSlackTokensManually(savedState: Awaited<ReturnType<typeof l
 async function collectSlackTokens(savedState: Awaited<ReturnType<typeof loadSavedInstallerState>>): Promise<{ slackBotToken: string; slackAppToken: string }> {
   const hasSavedTokens = Boolean(savedState.slackBotToken && savedState.slackAppToken);
 
+  // Smart reuse: live-check saved tokens so we only offer (and preselect) them
+  // when they still work — and show which workspace they belong to.
+  let savedTokensValid = false;
+  let savedTokensHint = "";
+  if (hasSavedTokens) {
+    const checkSpinner = p.spinner();
+    checkSpinner.start("Checking your saved Slack tokens...");
+    const identity = await testSlackBotToken(savedState.slackBotToken!);
+    if (identity.ok) {
+      savedTokensValid = true;
+      savedTokensHint = `still valid — workspace “${identity.team || "?"}”, bot @${identity.botUser || "citio"}`;
+      checkSpinner.stop(`Saved Slack tokens are valid (workspace “${identity.team || "?"}”).`);
+    } else {
+      checkSpinner.stop("Saved Slack tokens no longer validate — the app may have been deleted or the token revoked.");
+    }
+  }
+
   const setupMode = (await p.select({
     message: "How should Slack be configured?",
-    initialValue: hasSavedTokens ? "reuse" : "manual",
+    initialValue: savedTokensValid ? "reuse" : "manual",
     options: [
-      ...(hasSavedTokens ? [{
+      ...(savedTokensValid ? [{
         value: "reuse",
-        label: "Reuse saved Slack tokens",
-        hint: "Keep the previously saved bot and app tokens",
+        label: "Reuse saved Slack tokens (recommended)",
+        hint: savedTokensHint,
       }] : []),
       {
         value: "manual",
-        label: "Guided setup (recommended)",
+        label: savedTokensValid ? "Guided setup — create a new app" : "Guided setup (recommended)",
         hint: "Paste a ready-made app manifest into Slack — we walk you through every click",
       },
       {
         value: "automatic",
-        label: "Automatic app creation",
-        hint: "Citio creates the app via the Slack API — needs an app configuration token (xoxe…)",
+        label: "Automatic app creation (advanced)",
+        hint: "Citio creates the app via the Slack API — needs a 12-hour app configuration token (xoxe…)",
       },
     ],
   })) as "reuse" | "automatic" | "manual";
