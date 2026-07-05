@@ -1253,15 +1253,22 @@ async function deployToAws(config: InitConfig): Promise<boolean> {
   } else if (config.provider === "claude" && config.claudeOauthToken) {
     envVars.push({ name: "CLAUDE_CODE_OAUTH_TOKEN", value: config.claudeOauthToken });
   } else if (config.authMethod === "oauth") {
-    // OAuth: credentials uploaded to EFS after deploy (see post-deploy section below)
-    // No CITIO_NEEDS_AUTH — container doesn't do interactive auth
+    // Codex OAuth: the container authenticates itself post-deploy via device
+    // auth and keeps its credentials on EFS. Claude OAuth is handled above via
+    // the CLAUDE_CODE_OAUTH_TOKEN env var — no EFS involvement.
   }
 
-  const efsFileSystemId = (config.enableEfs || config.authMethod === "oauth")
+  // EFS is needed when the user enabled it, or for Codex OAuth (which stores
+  // the container's own credentials there). Claude OAuth must NOT force EFS —
+  // its token is a plain env var (resolving a non-existent filesystem here
+  // used to hard-exit the claude+oauth+no-EFS deploy).
+  const needsEfs = config.enableEfs || (config.provider === "codex" && config.authMethod === "oauth");
+
+  const efsFileSystemId = needsEfs
     ? resolveEfsFileSystemId(region, profileFlag, efsId)
     : "";
 
-  const homeVolume = (config.enableEfs || config.authMethod === "oauth")
+  const homeVolume = needsEfs
     ? {
         name: "citio-home",
         efsVolumeConfiguration: {
