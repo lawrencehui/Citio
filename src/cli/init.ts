@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import * as p from "@clack/prompts";
+import pc from "picocolors";
 import { execSync, execFileSync } from "child_process";
 import { writeFileSync, readFileSync, existsSync, mkdirSync, chmodSync } from "fs";
 import path from "path";
@@ -38,6 +39,20 @@ interface InitConfig {
 }
 
 
+
+// --- styling helpers (color = information, not decoration) --------------------
+/** inline command the user should run: cyan */
+const cmd = (s: string) => pc.cyan(s);
+/** clickable/visitable URL: underlined cyan */
+const url = (s: string) => pc.underline(pc.cyan(s));
+/** step/section header inside a note: bold */
+const step = (s: string) => pc.bold(s);
+/** literal value/token prefix to recognise: yellow */
+const val = (s: string) => pc.yellow(s);
+/** caution line: yellow */
+const warn = (s: string) => pc.yellow(s);
+/** positive/checklist mark: green */
+const ok = (s: string) => pc.green(s);
 
 function runDeployCommand(command: string, errorMessage: string, options: { cwd?: string; timeout?: number; encoding?: BufferEncoding } = {}): string {
   try {
@@ -317,7 +332,7 @@ async function promptSlackTokensManually(savedState: Awaited<ReturnType<typeof l
 
   const openedCreate = openBrowser(CREATE_APP_URL);
   p.note(
-    `STEP 1 — Create the app (${openedCreate ? "a browser window just opened" : `open ${CREATE_APP_URL}`})\n` +
+    `${step("STEP 1 — Create the app")} (${openedCreate ? "a browser window just opened" : `open ${url(CREATE_APP_URL)}`})\n` +
     `  • If you get signed out at any point: sign in at slack.com/signin,\n` +
     `    then return to ${CREATE_APP_URL}\n` +
     "  • Choose “From a manifest” → pick your workspace → Next\n" +
@@ -325,15 +340,15 @@ async function promptSlackTokensManually(savedState: Awaited<ReturnType<typeof l
     `    (${copied ? "it's on your clipboard — just press Cmd+V / Ctrl+V" : `copy it from ${manifestPath}`};\n` +
     "    replace whatever placeholder JSON Slack shows) → Next → Create\n" +
     "\n" +
-    "STEP 2 — Install it\n" +
+    `${step("STEP 2 — Install it")}\n` +
     "  • On the app page: “Install App” (left sidebar) →\n" +
     "    the green “Install to <your workspace>” button → review → Allow\n" +
     "\n" +
-    "STEP 3 — Copy the Bot Token (xoxb-…)\n" +
+    `${step("STEP 3 — Copy the Bot Token")} (${val("xoxb-…")})\n` +
     "  • Left sidebar → “OAuth & Permissions”\n" +
     "  • Copy “Bot User OAuth Token” — it starts with xoxb-\n" +
     "\n" +
-    "STEP 4 — Create + copy the App Token (xapp-…)\n" +
+    `${step("STEP 4 — Create + copy the App Token")} (${val("xapp-…")})\n` +
     "  • Left sidebar → “Basic Information” → scroll to “App-Level Tokens”\n" +
     "  • “Generate Token and Scopes” → name it citio-socket\n" +
     "  • “Add Scope” → connections:write → Generate\n" +
@@ -559,11 +574,11 @@ async function collectConfig(): Promise<InitConfig> {
 
     if (provider === "claude") {
       p.note(
-        "Claude uses a long-lived headless token (starts with sk-ant-oat01-…)\n" +
+        `Claude uses a long-lived headless token (starts with ${val("sk-ant-oat01-…")})\n` +
         "minted from your Claude Max/Pro login. To get one:\n" +
         "\n" +
         "  1. Open a SECOND terminal window\n" +
-        "  2. Run:  claude setup-token\n" +
+        `  2. Run:  ${cmd("claude setup-token")}\n` +
         "  3. A browser opens — sign in with your Claude account and approve\n" +
         "  4. Copy the full token it prints (sk-ant-oat01-…) and paste it here\n" +
         "\n" +
@@ -786,10 +801,10 @@ async function collectConfig(): Promise<InitConfig> {
   p.note(
     "Citio deploys into YOUR AWS account. To make this smooth, have:\n" +
     "\n" +
-    "  1. AWS CLI v2 installed  (aws --version)\n" +
+    `  1. AWS CLI v2 installed  (${cmd("aws --version")})\n` +
     "  2. A profile with working credentials —\n" +
-    "     • access key:  aws configure   (or  aws configure --profile <name>)\n" +
-    "     • or SSO:      aws configure sso && aws sso login --profile <name>\n" +
+    `     • access key:  ${cmd("aws configure")}   (or  ${cmd("aws configure --profile <name>")})\n` +
+    `     • or SSO:      ${cmd("aws configure sso && aws sso login --profile <name>")}\n` +
     "  3. Permissions to create: ECR repo · ECS cluster/service · IAM roles\n" +
     "     (citio-*, incl. iam:PassRole) · security group · CloudWatch logs · EFS\n" +
     "     • Personal account: the AdministratorAccess policy is simplest\n" +
@@ -797,7 +812,7 @@ async function collectConfig(): Promise<InitConfig> {
     "\n" +
     "You'll pick the profile next; we verify credentials and show WHICH\n" +
     "account you're deploying to before anything is created.\n" +
-    "Cost note: the default always-on task is ~$70–90/month (scale-to-zero\n" +
+    `${warn("Cost note: the default always-on task is ~$70–90/month")} (scale-to-zero\n` +
     "and teardown commands are in docs/AWS_SETUP.md; `citio destroy` removes it).",
     "AWS deployment — what your profile needs"
   );
@@ -1627,20 +1642,20 @@ async function deployToAws(config: InitConfig): Promise<boolean> {
 }
 
 async function main(): Promise<void> {
-  p.intro("Welcome to Citio - Autonomous CTO Agent");
+  p.intro(pc.bgCyan(pc.black(" Citio ")) + " " + pc.bold("Autonomous CTO Agent") + pc.dim(" — self-hosted, in your Slack"));
 
   p.note(
     "Setup takes ~10 minutes and walks you through every credential.\n" +
     "Have these ready (each step shows exactly where to get them):\n" +
     "\n" +
-    "  ✓ A Slack workspace where you can create an app\n" +
-    "  ✓ A GitHub account (we'll create a token together)\n" +
-    "  ✓ An AWS account + CLI (no CLI or unsure about permissions?\n" +
+    `  ${ok("✓")} A Slack workspace where you can create an app\n` +
+    `  ${ok("✓")} A GitHub account (we'll create a token together)\n` +
+    `  ${ok("✓")} An AWS account + CLI (no CLI or unsure about permissions?\n` +
     "    see docs/AWS_SETUP.md — we also verify before deploying)\n" +
-    "  ✓ A Claude Max/Pro or ChatGPT Go/Plus/Pro login for the agent\n" +
+    `  ${ok("✓")} A Claude Max/Pro or ChatGPT Go/Plus/Pro login for the agent\n` +
     "\n" +
-    "Your answers are saved as you go — if anything fails, re-run\n" +
-    "`npx citio` and it resumes with your saved values.",
+    `Your answers are saved as you go — if anything fails, re-run\n` +
+    `${cmd("npx citio")} and it resumes with your saved values.`,
     "Before you start"
   );
 

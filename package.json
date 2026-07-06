@@ -1,7 +1,7 @@
 {
   "name": "citio",
   "version": "0.1.4",
-  "description": "Self-hosted AI coding agents that live in Slack \u2014 run Claude Code or Codex in your own infra, ship PRs, and keep every credential behind a controlled MCP tool layer.",
+  "description": "Self-hosted AI coding agents that live in Slack — run Claude Code or Codex in your own infra, ship PRs, and keep every credential behind a controlled MCP tool layer.",
   "keywords": [
     "slack",
     "ai-agent",
@@ -63,6 +63,7 @@
     "@slack/bolt": "^4.6.0",
     "dotenv": "^17.3.1",
     "keytar": "^7.9.0",
+    "picocolors": "^1.1.1",
     "yaml": "^2.8.3",
     "zod": "^4.3.6"
   },
