@@ -49,6 +49,39 @@ const MCP_PROGRESS_MESSAGES: Record<string, string> = {
 
 const NATIVE_TOOL_NAMES = new Set(["Agent", "Bash", "Grep", "Glob", "Read", "ToolSearch"]);
 
+/** Build a specific one-line label from the tool's salient argument. */
+function specificProgressLabel(toolName: string, argsJson: string | undefined): string | null {
+  const short = toolName.replace(/^mcp__citio__/, "").replace(/^citio\./, "");
+  let args: Record<string, unknown> = {};
+  if (argsJson) {
+    try { args = JSON.parse(argsJson) as Record<string, unknown>; } catch { /* generic fallback */ }
+  }
+  const s = (key: string, max = 90): string | null => {
+    const v = args[key];
+    if (typeof v !== "string" || !v.trim()) return null;
+    const clean = v.replace(/\s+/g, " ").trim();
+    return clean.length > max ? clean.slice(0, max) + "…" : clean;
+  };
+  switch (short) {
+    case "run_command": { const c = s("command"); return c ? `Running: \`${c}\`` : null; }
+    case "read_file": { const f = s("path") || s("file_path") || s("file"); return f ? `Reading ${f}` : null; }
+    case "write_file": { const f = s("path") || s("file_path") || s("file"); return f ? `Editing ${f}` : null; }
+    case "investigate_codebase": { const q = s("pattern") || s("query"); return q ? `Searching code for “${q}”` : null; }
+    case "query_logs": { const g = s("log_group") || s("group") || s("query"); return g ? `Querying logs: ${g}` : null; }
+    case "create_branch": { const b = s("branch") || s("name"); return b ? `Creating branch ${b}` : null; }
+    case "create_pr": { const ti = s("title"); return ti ? `Opening PR: ${ti}` : null; }
+    case "check_ci_status": { const n = args["pr_number"]; return typeof n === "number" ? `Checking CI for PR #${n}` : null; }
+    default: return null;
+  }
+}
+
+function progressLabelFor(toolNameWithArgs: string): string | null {
+  const sep = toolNameWithArgs.indexOf(" · ");
+  const toolName = (sep >= 0 ? toolNameWithArgs.slice(0, sep) : toolNameWithArgs).trim();
+  const argsJson = sep >= 0 ? toolNameWithArgs.slice(sep + 3).replace(/…$/, "") : undefined;
+  return specificProgressLabel(toolName, argsJson) || MCP_PROGRESS_MESSAGES[toolName] || null;
+}
+
 function normalizeProgressChunk(chunk: string): string | null {
   const trimmed = chunk.trim();
   if (!trimmed) {
@@ -60,16 +93,16 @@ function normalizeProgressChunk(chunk: string): string | null {
   }
 
   if (trimmed.startsWith("Using tool: ")) {
-    const toolName = trimmed.slice("Using tool: ".length).trim();
-    if (toolName === "mcp__citio__post_update" || NATIVE_TOOL_NAMES.has(toolName)) {
+    const rest = trimmed.slice("Using tool: ".length).trim();
+    const bareName = rest.split(" · ")[0];
+    if (bareName === "mcp__citio__post_update" || NATIVE_TOOL_NAMES.has(bareName)) {
       return null;
     }
-    return MCP_PROGRESS_MESSAGES[toolName] || null;
+    return progressLabelFor(rest);
   }
 
   if (trimmed.startsWith("Using MCP tool ")) {
-    const toolName = trimmed.slice("Using MCP tool ".length).trim();
-    return MCP_PROGRESS_MESSAGES[toolName] || null;
+    return progressLabelFor(trimmed.slice("Using MCP tool ".length).trim());
   }
 
   if (trimmed.startsWith("MCP tool ")) {
@@ -357,6 +390,25 @@ export class SlackAdapter {
     });
   }
 
+  // In-flight channel requests, so a deploy-time SIGTERM can apologise instead
+  // of going silent (an in-flight `codex exec`/`claude -p` dies with the container).
+  private activeRequests = new Map<string, { client: WebClient; channel: string; thinkingTs?: string }>();
+
+  /** Called on SIGTERM: tell every waiting thread we're restarting. */
+  async notifyShutdown(): Promise<void> {
+    const notices = [...this.activeRequests.values()].map(async (req) => {
+      const text = "⚠️ I'm being restarted mid-task (deploy in progress). Please re-send your request in a minute.";
+      try {
+        if (req.thinkingTs) {
+          await req.client.chat.update({ channel: req.channel, ts: req.thinkingTs, text });
+        } else {
+          await req.client.chat.postMessage({ channel: req.channel, text });
+        }
+      } catch { /* best effort — we're dying anyway */ }
+    });
+    await Promise.all(notices);
+  }
+
   private async handleChannelRequest(params: {
     client: WebClient;
     userId?: string;
@@ -409,6 +461,7 @@ export class SlackAdapter {
       }
 
       const threadKey = `${channel}:${threadTs}`;
+      this.activeRequests.set(threadKey, { client, channel, thinkingTs });
       const sessionId = this.getProviderSessionId(threadKey);
 
       const prompt = this.buildPrompt(text, "", threadKey);
@@ -452,6 +505,7 @@ export class SlackAdapter {
           }
         },
         onComplete: async (output) => {
+          this.activeRequests.delete(threadKey);
           stopProgressPolling();
           const finalOutput = redactCredentials(output);
           try {
@@ -481,6 +535,7 @@ export class SlackAdapter {
           }
         },
         onError: async (err) => {
+          this.activeRequests.delete(threadKey);
           stopProgressPolling();
           await client.chat.postMessage({
             channel,

@@ -14,8 +14,8 @@ engine:
   max_session_duration_minutes: 60
   max_concurrent_sessions: 1
   providers:
-    codex: {}
-    claude: {}
+    codex: {}          # optional: { model: "...", reasoning_effort: low|medium|high }
+    claude: {}         # optional: { model: "claude-sonnet-4-6" } — faster ops replies than the opus default
 
 skills:
   installed: []

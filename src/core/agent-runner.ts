@@ -16,6 +16,17 @@ interface QueuedTask {
   onError: (error: Error) => void;
 }
 
+function formatToolArgs(args: unknown): string {
+  if (args == null) return "";
+  try {
+    const json = typeof args === "string" ? args : JSON.stringify(args);
+    if (!json || json === "{}" || json === "null") return "";
+    return ` · ${json.length > 160 ? json.slice(0, 160) + "…" : json}`;
+  } catch {
+    return "";
+  }
+}
+
 function appendDedupedText(current: string, next: string): string {
   if (!next) {
     return current;
@@ -457,7 +468,8 @@ export class AgentRunner {
       const msg = event.message as { content?: Array<{ type: string; name?: string }> };
       for (const block of msg.content || []) {
         if (block.type === "tool_use" && block.name) {
-          if (task.onProgress) task.onProgress(`Using tool: ${block.name}`);
+          const blockInput = (block as { input?: unknown }).input;
+          if (task.onProgress) task.onProgress(`Using tool: ${block.name}${formatToolArgs(blockInput)}`);
         }
       }
     } else if (type === "content_block_delta") {
@@ -483,7 +495,8 @@ export class AgentRunner {
     if (type === "item.started") {
       const item = event.item as { type?: string; server?: string; tool?: string } | undefined;
       if (item?.type === "mcp_tool_call" && item.server && item.tool && task.onProgress) {
-        task.onProgress(`Using MCP tool ${item.server}.${item.tool}`);
+        const rawArgs = (item as { arguments?: unknown }).arguments;
+        task.onProgress(`Using MCP tool ${item.server}.${item.tool}${formatToolArgs(rawArgs)}`);
       }
       return;
     }

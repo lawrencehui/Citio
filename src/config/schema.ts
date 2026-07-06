@@ -2,6 +2,10 @@ import { z } from "zod";
 
 export const ProviderConfigSchema = z.object({
   api_key: z.string().optional(),
+  // Optional model override (CODEX_MODEL / CLAUDE_MODEL equivalents).
+  model: z.string().optional(),
+  // Codex only: model_reasoning_effort for `codex exec` (default "low" at runtime).
+  reasoning_effort: z.enum(["low", "medium", "high"]).optional(),
 });
 
 export const CitioConfigSchema = z.object({

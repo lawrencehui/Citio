@@ -136,6 +136,13 @@ async function main(): Promise<void> {
     console.log(JSON.stringify({ type: "health_check", port: 3001 }));
   });
 
+  // Provider tuning from citio.yaml -> env (explicit env vars still win).
+  const codexProvider = config.engine.providers?.codex;
+  const claudeProvider = config.engine.providers?.claude;
+  if (codexProvider?.model && !process.env.CODEX_MODEL) process.env.CODEX_MODEL = codexProvider.model;
+  if (codexProvider?.reasoning_effort && !process.env.CODEX_REASONING_EFFORT) process.env.CODEX_REASONING_EFFORT = codexProvider.reasoning_effort;
+  if (claudeProvider?.model && !process.env.CLAUDE_MODEL) process.env.CLAUDE_MODEL = claudeProvider.model;
+
   // Start Slack adapter
   const slack = new SlackAdapter(config, agentRunner, sessionManager);
   await slack.start();
@@ -145,6 +152,9 @@ async function main(): Promise<void> {
   // Graceful shutdown
   const shutdown = async (signal: string) => {
     console.log(JSON.stringify({ type: "shutdown", signal }));
+    // Tell any thread with an in-flight task that we're restarting — the
+    // provider process dies with the container and would otherwise go silent.
+    await Promise.race([slack.notifyShutdown(), new Promise((r) => setTimeout(r, 3000))]);
     await Promise.race([slack.stop(), new Promise((r) => setTimeout(r, 10000))]);
     healthServer.close();
     console.log(JSON.stringify({ type: "shutdown_complete" }));

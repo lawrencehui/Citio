@@ -375,14 +375,21 @@ async function main() {
     withAudit(memoryDir, "check_ci_status", async ({ repo, pr_number }) => {
       try {
         const repoPath = resolveUnderRoot(workspacePath, repo);
+        // gh pr checks JSON fields are name/state/bucket/... — "status"/"conclusion"
+        // belong to `gh run` and made every call fail with "Unknown JSON field".
         const result = runFile(
           "gh",
-          ["pr", "checks", String(pr_number), "--json", "name,status,conclusion"],
+          ["pr", "checks", String(pr_number), "--json", "name,state,bucket,link"],
           { cwd: repoPath, timeout: 30000 }
         );
         return createTextResult(`CI for PR #${pr_number}:\n${result}`);
       } catch (err) {
-        return createTextResult(`Error: ${extractExecError(err)}`, true);
+        const detail = extractExecError(err);
+        // gh exits non-zero when a PR simply has no checks — that's an answer, not an error.
+        if (/no checks reported/i.test(detail)) {
+          return createTextResult(`PR #${pr_number} has no CI checks reported (repo may have no CI configured).`);
+        }
+        return createTextResult(`Error: ${detail}`, true);
       }
     })
   );
