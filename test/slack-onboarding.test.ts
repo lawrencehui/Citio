@@ -15,7 +15,7 @@ test("buildCitioSlackManifest enables socket mode and required scopes", () => {
   const features = manifest.features as Record<string, unknown>;
 
   assert.equal(settings.socket_mode_enabled, true);
-  assert.deepEqual((settings.event_subscriptions as Record<string, unknown>).bot_events, ["app_mention", "message.im", "assistant_thread_started", "assistant_thread_context_changed"]);
+  assert.deepEqual((settings.event_subscriptions as Record<string, unknown>).bot_events, ["app_mention", "message.im", "assistant_thread_started", "assistant_thread_context_changed", "message.channels", "message.groups"]);
   assert.ok(scopes.includes("assistant:write"));
   assert.ok(scopes.includes("chat:write"));
   assert.ok(scopes.includes("app_mentions:read"));

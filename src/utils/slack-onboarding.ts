@@ -86,6 +86,9 @@ export function buildCitioSlackManifest(options: SlackManifestOptions = {}): Rec
           // the assistant pane silently does nothing.
           "assistant_thread_started",
           "assistant_thread_context_changed",
+          // Ambient mode: plain messages in the bot's home channel
+          "message.channels",
+          "message.groups",
         ],
       },
       interactivity: {

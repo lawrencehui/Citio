@@ -12,6 +12,9 @@ export const CitioConfigSchema = z.object({
     bot_token: z.string(),
     app_token: z.string(),
     channel_id: z.string().optional(),
+    // Ambient mode: answer plain (unmentioned) messages in channel_id,
+    // skipping messages that @mention someone else. Default on.
+    respond_without_mention: z.boolean().default(true),
     authorized_users: z.array(z.string()).default([]),  // who can @mention in channels (empty = all)
     admin_users: z.array(z.string()).default([]),        // who can DM the bot (empty = all)
   }),

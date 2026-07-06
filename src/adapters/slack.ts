@@ -1,4 +1,5 @@
 import { App, Assistant } from "@slack/bolt";
+import type { WebClient } from "@slack/web-api";
 import { existsSync, readFileSync } from "fs";
 import path from "path";
 import { AgentRunner } from "../core/agent-runner.js";
@@ -306,13 +307,68 @@ export class SlackAdapter {
 
     // Handle @mentions in channels — work directly in the channel thread
     this.app.event("app_mention", async ({ event, client }) => {
-      const userId = event.user;
-      const text = (event.text || "").replace(/<@[A-Z0-9]+>/g, "").trim();
-      const channel = event.channel;
-      const threadTs = event.thread_ts || event.ts;
+      await this.handleChannelRequest({
+        client,
+        userId: event.user,
+        rawText: event.text || "",
+        channel: event.channel,
+        threadTs: event.thread_ts || event.ts,
+        trigger: "app_mention",
+      });
+    });
+
+    // Ambient mode: in the bot's home channel, plain messages work without an
+    // @mention. Skipped: messages addressed to OTHER people (someone else's
+    // <@mention>), bot/system messages, edits, and thread replies (threads
+    // stay opt-in via @mention). Requires the message.channels/groups events
+    // in the Slack app manifest.
+    this.app.event("message", async ({ event, client, context }) => {
+      if (this.config.slack.respond_without_mention === false) return;
+      const homeChannel = this.config.slack.channel_id;
+      if (!homeChannel) return;
+
+      const msg = event as unknown as {
+        channel?: string; channel_type?: string; user?: string; text?: string;
+        subtype?: string; bot_id?: string; thread_ts?: string; ts?: string;
+      };
+      if (msg.channel !== homeChannel) return;
+      if (msg.channel_type !== "channel" && msg.channel_type !== "group") return;
+      if (msg.subtype || msg.bot_id) return;
+      if (msg.thread_ts) return;
+
+      const botUserId = context.botUserId;
+      const rawText = msg.text || "";
+      if (!msg.user || (botUserId && msg.user === botUserId)) return;
+      // Bot mentioned -> app_mention fires for it; don't double-handle.
+      if (botUserId && rawText.includes(`<@${botUserId}>`)) return;
+      // Addressed to someone else -> leave the humans alone.
+      if (/<@[A-Z0-9]+>/.test(rawText)) return;
+
+      await this.handleChannelRequest({
+        client,
+        userId: msg.user,
+        rawText,
+        channel: msg.channel,
+        threadTs: msg.thread_ts || msg.ts || "",
+        trigger: "ambient_message",
+      });
+    });
+  }
+
+  private async handleChannelRequest(params: {
+    client: WebClient;
+    userId?: string;
+    rawText: string;
+    channel: string;
+    threadTs: string;
+    trigger: "app_mention" | "ambient_message";
+  }): Promise<void> {
+    const { client, channel, threadTs } = params;
+    const userId = params.userId;
+    const text = params.rawText.replace(/<@[A-Z0-9]+>/g, "").trim();
 
       console.log(JSON.stringify({
-        type: "app_mention",
+        type: params.trigger,
         user: userId,
         text: text.slice(0, 100),
         channel,
@@ -422,7 +478,6 @@ export class SlackAdapter {
           });
         },
       });
-    });
   }
 
   private getProviderSessionId(threadKey: string): string | null {
