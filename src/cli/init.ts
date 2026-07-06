@@ -558,13 +558,21 @@ async function collectConfig(): Promise<InitConfig> {
     const authPath = `${homeDir}/.codex/auth.json`;
 
     if (provider === "claude") {
+      p.note(
+        "Claude authenticates with a long-lived headless token minted from\n" +
+        "your Claude Max/Pro login by running `claude setup-token`. It's a\n" +
+        "static credential (no refresh rotation), so it deploys safely as an\n" +
+        "environment variable — unlike Codex, no in-container login is needed.",
+        "Claude authentication"
+      );
       if (savedState.claudeOauthToken && validateClaudeOauthToken(savedState.claudeOauthToken)) {
         const token = await reuseOrPromptSecret({
-          message: "Claude OAuth token",
+          message: "Claude OAuth token — press Enter to reuse your saved one, or paste a fresh `claude setup-token` result:",
           existingValue: savedState.claudeOauthToken,
         });
         claudeOauthToken = normalizeClaudeOauthToken(token);
       } else {
+        p.log.info("No saved token — running `claude setup-token` for you now (follow its browser prompt)...");
         claudeOauthToken = await ensurePortableClaudeAuth(homeDir);
       }
     } else {
