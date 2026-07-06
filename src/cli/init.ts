@@ -782,7 +782,26 @@ async function collectConfig(): Promise<InitConfig> {
   })) as string;
   if (p.isCancel(gitUserEmail)) process.exit(0);
 
-  // AWS config — default to the region the user's AWS CLI is already set to.
+  // AWS config — state everything the deploy needs BEFORE asking any AWS question.
+  p.note(
+    "Citio deploys into YOUR AWS account. To make this smooth, have:\n" +
+    "\n" +
+    "  1. AWS CLI v2 installed  (aws --version)\n" +
+    "  2. A profile with working credentials —\n" +
+    "     • access key:  aws configure   (or  aws configure --profile <name>)\n" +
+    "     • or SSO:      aws configure sso && aws sso login --profile <name>\n" +
+    "  3. Permissions to create: ECR repo · ECS cluster/service · IAM roles\n" +
+    "     (citio-*, incl. iam:PassRole) · security group · CloudWatch logs · EFS\n" +
+    "     • Personal account: the AdministratorAccess policy is simplest\n" +
+    "     • Shared/work account: least-privilege policy in docs/AWS_SETUP.md\n" +
+    "\n" +
+    "You'll pick the profile next; we verify credentials and show WHICH\n" +
+    "account you're deploying to before anything is created.\n" +
+    "Cost note: the default always-on task is ~$70–90/month (scale-to-zero\n" +
+    "and teardown commands are in docs/AWS_SETUP.md; `citio destroy` removes it).",
+    "AWS deployment — what your profile needs"
+  );
+
   let detectedRegion = "";
   try {
     detectedRegion = execSync("aws configure get region 2>/dev/null", { encoding: "utf-8", stdio: "pipe" }).trim();
