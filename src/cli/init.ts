@@ -517,7 +517,7 @@ async function collectConfig(): Promise<InitConfig> {
       {
         value: "codex",
         label: "Codex (OpenAI)",
-        hint: "OpenAI / ChatGPT Plus",
+        hint: "OpenAI / ChatGPT Go, Plus or Pro",
       },
       {
         value: "claude",
@@ -559,11 +559,17 @@ async function collectConfig(): Promise<InitConfig> {
 
     if (provider === "claude") {
       p.note(
-        "Claude authenticates with a long-lived headless token minted from\n" +
-        "your Claude Max/Pro login by running `claude setup-token`. It's a\n" +
-        "static credential (no refresh rotation), so it deploys safely as an\n" +
-        "environment variable — unlike Codex, no in-container login is needed.",
-        "Claude authentication"
+        "Claude uses a long-lived headless token (starts with sk-ant-oat01-…)\n" +
+        "minted from your Claude Max/Pro login. To get one:\n" +
+        "\n" +
+        "  1. Open a SECOND terminal window\n" +
+        "  2. Run:  claude setup-token\n" +
+        "  3. A browser opens — sign in with your Claude account and approve\n" +
+        "  4. Copy the full token it prints (sk-ant-oat01-…) and paste it here\n" +
+        "\n" +
+        "It's a static credential (no refresh rotation), so it deploys safely\n" +
+        "as an environment variable — no in-container login step like Codex.",
+        "Claude authentication — 4 steps"
       );
       if (savedState.claudeOauthToken && validateClaudeOauthToken(savedState.claudeOauthToken)) {
         const token = await reuseOrPromptSecret({
@@ -583,7 +589,7 @@ async function collectConfig(): Promise<InitConfig> {
       p.note(
         "Codex will sign in INSIDE the container during deploy:\n" +
         "the deploy output will show an OpenAI device-auth URL + code —\n" +
-        "open it in your browser and approve (uses your ChatGPT Plus/Pro login).\n" +
+        "open it in your browser and approve (uses your ChatGPT Go/Plus/Pro login).\n" +
         "The container keeps its own credentials on EFS from then on.",
         "Codex authentication"
       );
@@ -1612,7 +1618,7 @@ async function main(): Promise<void> {
     "  ✓ A GitHub account (we'll create a token together)\n" +
     "  ✓ An AWS account + CLI (no CLI or unsure about permissions?\n" +
     "    see docs/AWS_SETUP.md — we also verify before deploying)\n" +
-    "  ✓ A Claude Max/Pro or ChatGPT Plus login for the agent\n" +
+    "  ✓ A Claude Max/Pro or ChatGPT Go/Plus/Pro login for the agent\n" +
     "\n" +
     "Your answers are saved as you go — if anything fails, re-run\n" +
     "`npx citio` and it resumes with your saved values.",

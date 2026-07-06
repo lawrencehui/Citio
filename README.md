@@ -6,7 +6,7 @@
 
 `@mention` it or DM it and ask for real engineering work — investigate a bug, dig through CloudWatch logs, fix code, open a PR — and Citio runs **Claude Code** or **OpenAI Codex** inside your own infrastructure to do it. Slack is the interface, a controlled MCP tool layer is the safety boundary, and every credential stays in your AWS account.
 
-**No Team or Enterprise plan required.** Citio runs on an individual **Claude Max/Pro** or **ChatGPT Plus (Codex)** subscription — the agent you already pay for, now working from Slack.
+**No Team or Enterprise plan required.** Citio runs on an individual **Claude Max/Pro** or **ChatGPT Go/Plus/Pro (Codex)** subscription — the agent you already pay for, now working from Slack.
 
 <br/>
 
@@ -54,7 +54,7 @@ Anthropic's [Claude Tag](https://techcrunch.com/2026/06/23/anthropics-claude-tag
 |                    | **Citio**                                          | **Claude Tag**                       |
 | ------------------ | -------------------------------------------------- | ------------------------------------ |
 | **Hosting**        | Your AWS account, your infra                       | Anthropic-hosted SaaS                |
-| **Plan required**  | Individual **Claude Max/Pro** *or* **ChatGPT Plus** | **Claude Team or Enterprise**        |
+| **Plan required**  | Individual **Claude Max/Pro** *or* **ChatGPT Go/Plus/Pro** | **Claude Team or Enterprise**        |
 | **Providers**      | Claude Code **or** OpenAI Codex                    | Claude only                          |
 | **Credentials**    | Stay with you, behind an MCP allowlist             | Managed by the vendor                |
 | **Best for**       | Solo devs & small teams who self-host              | Orgs already on Team/Enterprise      |
@@ -111,7 +111,7 @@ More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 **Accounts & tokens**
 
-- An **agent subscription**: Claude Max/Pro, or ChatGPT Plus for Codex (API key works as a fallback).
+- An **agent subscription**: Claude Max/Pro, or ChatGPT Go/Plus/Pro for Codex (API key works as a fallback).
 - A **Slack app** (the installer can create it for you from a config token) + the target channel ID.
 - A **GitHub fine-grained PAT** with `contents: write` + `pull_requests: write` on the repos you want worked on.
 
