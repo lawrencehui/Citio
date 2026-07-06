@@ -306,7 +306,7 @@ export class SlackAdapter {
     this.app.assistant(assistant);
 
     // Handle @mentions in channels — work directly in the channel thread
-    this.app.event("app_mention", async ({ event, client }) => {
+    this.app.event("app_mention", async ({ event, client, context }) => {
       await this.handleChannelRequest({
         client,
         userId: event.user,
@@ -314,6 +314,7 @@ export class SlackAdapter {
         channel: event.channel,
         threadTs: event.thread_ts || event.ts,
         trigger: "app_mention",
+        botUserId: context.botUserId,
       });
     });
 
@@ -351,6 +352,7 @@ export class SlackAdapter {
         channel: msg.channel,
         threadTs: msg.thread_ts || msg.ts || "",
         trigger: "ambient_message",
+        botUserId,
       });
     });
   }
@@ -362,10 +364,18 @@ export class SlackAdapter {
     channel: string;
     threadTs: string;
     trigger: "app_mention" | "ambient_message";
+    botUserId?: string;
   }): Promise<void> {
     const { client, channel, threadTs } = params;
     const userId = params.userId;
-    const text = params.rawText.replace(/<@[A-Z0-9]+>/g, "").trim();
+    // Strip only the BOT's own mention — other people's <@mentions> are meaningful
+    // context ("check what @john deployed") and render as real mentions if the
+    // agent echoes them in its reply. Fall back to strip-all when the bot id is
+    // unknown (shouldn't happen under Bolt).
+    const text = (params.botUserId
+      ? params.rawText.split(`<@${params.botUserId}>`).join(" ")
+      : params.rawText.replace(/<@[A-Z0-9]+>/g, "")
+    ).replace(/\s+/g, " ").trim();
 
       console.log(JSON.stringify({
         type: params.trigger,
