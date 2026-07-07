@@ -62,10 +62,13 @@ The deploy creates: an ECR repository, an ECS cluster/service/task definition, I
     { "Sid": "EFS",  "Effect": "Allow", "Action": ["elasticfilesystem:CreateFileSystem", "elasticfilesystem:DescribeFileSystems", "elasticfilesystem:CreateMountTarget", "elasticfilesystem:DescribeMountTargets"], "Resource": "*" },
     { "Sid": "EC2",  "Effect": "Allow", "Action": ["ec2:DescribeVpcs", "ec2:DescribeSubnets", "ec2:DescribeSecurityGroups", "ec2:CreateSecurityGroup", "ec2:AuthorizeSecurityGroupIngress"], "Resource": "*" },
     { "Sid": "Logs", "Effect": "Allow", "Action": ["logs:CreateLogGroup", "logs:DescribeLogGroups", "logs:GetLogEvents", "logs:FilterLogEvents", "logs:StartLiveTail"], "Resource": "*" },
+    { "Sid": "Secrets", "Effect": "Allow", "Action": ["secretsmanager:CreateSecret", "secretsmanager:PutSecretValue", "secretsmanager:DescribeSecret", "secretsmanager:DeleteSecret"], "Resource": "arn:aws:secretsmanager:*:*:secret:citio/*" },
     { "Sid": "IAM",  "Effect": "Allow", "Action": ["iam:CreateRole", "iam:GetRole", "iam:PutRolePolicy", "iam:AttachRolePolicy", "iam:PassRole"], "Resource": "arn:aws:iam::*:role/citio*" }
   ]
 }
 ```
+
+> Citio stores your Slack/GitHub/provider tokens in **AWS Secrets Manager** (`citio/runtime`), not as plaintext task-def environment variables — the `Secrets` statement lets the installer create/rotate them, and the task's own role reads them at container start.
 
 > The `iam:PassRole` scoped to `role/citio*` is required so the ECS task can assume the roles the installer creates — this is the one people usually miss.
 
@@ -90,6 +93,7 @@ aws ecs update-service --cluster citio --service citio --desired-count 0
 aws ecs delete-service --cluster citio --service citio
 aws ecs delete-cluster --cluster citio
 aws ecr delete-repository --repository-name citio --force
+aws secretsmanager delete-secret --secret-id citio/runtime --force-delete-without-recovery
 # if you enabled EFS (find the ID first):
 aws efs describe-file-systems --creation-token citio-memory --query 'FileSystems[0].FileSystemId'
 aws efs delete-file-system --file-system-id <fs-...>   # delete mount targets first if prompted

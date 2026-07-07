@@ -2,7 +2,7 @@
 import * as p from "@clack/prompts";
 import pc from "picocolors";
 import { execSync, execFileSync } from "child_process";
-import { writeFileSync, readFileSync, existsSync, mkdirSync, chmodSync } from "fs";
+import { writeFileSync, readFileSync, existsSync, mkdirSync, chmodSync, unlinkSync } from "fs";
 import path from "path";
 import os from "os";
 import { stringify } from "yaml";
@@ -1259,6 +1259,15 @@ async function deployToAws(config: InitConfig): Promise<boolean> {
             "ecs:DescribeTaskDefinition", "ecs:ListTaskDefinitions"
           ],
           Resource: "*"
+        },
+        {
+          // Read runtime secrets from Secrets Manager (tokens live there, not in
+          // plaintext task-def env). Scoped to citio/* so it works regardless of
+          // whether the secret exists yet when the policy is written.
+          Sid: "SecretsRead",
+          Effect: "Allow",
+          Action: ["secretsmanager:GetSecretValue"],
+          Resource: `arn:aws:secretsmanager:${region}:${accountId}:secret:citio/*`
         }
       ]
     });
@@ -1271,12 +1280,48 @@ async function deployToAws(config: InitConfig): Promise<boolean> {
   }
   s.stop("IAM roles configured");
 
+  // 6b. Store tokens in AWS Secrets Manager, NOT as plaintext task-def env vars
+  // (those are readable via ecs:DescribeTaskDefinition). The secret is written
+  // from a temp file so no token ever appears on a command line / in ps output.
+  s.start("Storing tokens in AWS Secrets Manager...");
+  const secretValues: Record<string, string> = {
+    SLACK_BOT_TOKEN: config.slackBotToken,
+    SLACK_APP_TOKEN: config.slackAppToken,
+    GH_TOKEN: config.githubToken,
+  };
+  if (config.authMethod === "api_key" && config.providerApiKey) {
+    secretValues[config.provider === "codex" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY"] = config.providerApiKey;
+  } else if (config.provider === "claude" && config.claudeOauthToken) {
+    secretValues.CLAUDE_CODE_OAUTH_TOKEN = config.claudeOauthToken;
+  }
+  const secretName = "citio/runtime";
+  const secretFile = "/tmp/citio-secret.json";
+  writeFileSync(secretFile, JSON.stringify(secretValues), { mode: 0o600 });
+  let secretArn = "";
+  try {
+    secretArn = execSync(
+      `aws secretsmanager create-secret --name ${secretName} --secret-string file://${secretFile} --region ${region} ${profileFlag} --query ARN --output text`,
+      { encoding: "utf-8", stdio: "pipe" }
+    ).trim();
+  } catch {
+    // Already exists — rotate the value and read back the ARN.
+    execSync(
+      `aws secretsmanager put-secret-value --secret-id ${secretName} --secret-string file://${secretFile} --region ${region} ${profileFlag}`,
+      { stdio: "pipe" }
+    );
+    secretArn = execSync(
+      `aws secretsmanager describe-secret --secret-id ${secretName} --region ${region} ${profileFlag} --query ARN --output text`,
+      { encoding: "utf-8", stdio: "pipe" }
+    ).trim();
+  } finally {
+    try { unlinkSync(secretFile); } catch { /* already gone */ }
+  }
+  s.stop("Tokens stored in Secrets Manager (not in the task definition)");
+
   // 7. Register task definition
   s.start("Registering ECS task definition...");
+  // Non-secret runtime config only — every token comes from Secrets Manager below.
   const envVars = [
-    { name: "SLACK_BOT_TOKEN", value: config.slackBotToken },
-    { name: "SLACK_APP_TOKEN", value: config.slackAppToken },
-    { name: "GH_TOKEN", value: config.githubToken },
     { name: "HOME", value: "/home/citio" },
   ];
 
@@ -1287,24 +1332,17 @@ async function deployToAws(config: InitConfig): Promise<boolean> {
     );
   }
 
-  // Embed config as base64 so it doesn't need a file mount
+  // Embed config as base64 so it doesn't need a file mount (contains only
+  // ${ENV} placeholders for tokens — no secrets).
   const configYaml = readFileSync("citio.yaml", "utf-8");
   const configB64 = Buffer.from(configYaml).toString("base64");
   envVars.push({ name: "CITIO_CONFIG_B64", value: configB64 });
 
-  if (config.authMethod === "api_key" && config.providerApiKey) {
-    if (config.provider === "codex") {
-      envVars.push({ name: "OPENAI_API_KEY", value: config.providerApiKey });
-    } else {
-      envVars.push({ name: "ANTHROPIC_API_KEY", value: config.providerApiKey });
-    }
-  } else if (config.provider === "claude" && config.claudeOauthToken) {
-    envVars.push({ name: "CLAUDE_CODE_OAUTH_TOKEN", value: config.claudeOauthToken });
-  } else if (config.authMethod === "oauth") {
-    // Codex OAuth: the container authenticates itself post-deploy via device
-    // auth and keeps its credentials on EFS. Claude OAuth is handled above via
-    // the CLAUDE_CODE_OAUTH_TOKEN env var — no EFS involvement.
-  }
+  // Secrets injected by ECS from Secrets Manager at container start.
+  const secretEntries = Object.keys(secretValues).map((key) => ({
+    name: key,
+    valueFrom: `${secretArn}:${key}::`,
+  }));
 
   // EFS is needed when the user enabled it, or for Codex OAuth (which stores
   // the container's own credentials there). Claude OAuth must NOT force EFS —
@@ -1344,6 +1382,7 @@ async function deployToAws(config: InitConfig): Promise<boolean> {
         essential: true,
         portMappings: [{ containerPort: 3001, protocol: "tcp" }],
         environment: envVars,
+        secrets: secretEntries,
         mountPoints: homeVolume
           ? [{ sourceVolume: "citio-home", containerPath: "/home/citio", readOnly: false }]
           : undefined,

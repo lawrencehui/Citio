@@ -169,6 +169,11 @@ export async function destroyCommand(): Promise<void> {
   tryAws(`logs delete-log-group --log-group-name /ecs/${target.service}`, target);
   s.stop("Log group deleted (or was absent).");
 
+  s.start("Deleting Secrets Manager secret...");
+  // force + no recovery window so a re-deploy can reuse the name immediately.
+  tryAws(`secretsmanager delete-secret --secret-id citio/runtime --force-delete-without-recovery`, target);
+  s.stop("Secret deleted (or was absent).");
+
   // EFS is the dangerous one — separate, explicit confirmation.
   const efsId = tryAws(
     `efs describe-file-systems --creation-token citio-memory --query 'FileSystems[0].FileSystemId' --output text`,

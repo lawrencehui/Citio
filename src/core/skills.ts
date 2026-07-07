@@ -17,9 +17,9 @@ export const SKILL_REGISTRY: Record<string, SkillInfo> = {
     description: "Root-cause debugging discipline — find the bug before patching it",
     installMethod: "npx-skills",
   },
-  "code-reviewer": {
-    url: "anthropics/claude-code --skill simplify",
-    description: "Code quality review, deduplication, performance checks",
+  "code-review": {
+    url: "obra/superpowers --skill receiving-code-review",
+    description: "Systematic code-review discipline — respond to and act on review feedback",
     installMethod: "npx-skills",
   },
   "webapp-testing": {
@@ -113,10 +113,14 @@ export function installSkillsTo(
       }
       results.push({ skill, status: "installed" });
     } catch (err) {
+      // execSync throws with stdout/stderr buffers when stdio is piped — surface
+      // stderr so failures aren't masked by npm's notice noise on stdout.
+      const e = err as { message?: string; stderr?: Buffer | string };
+      const stderr = e?.stderr ? String(e.stderr).trim().split("\n").filter(Boolean).slice(-3).join(" | ") : "";
       results.push({
         skill,
         status: "failed",
-        error: err instanceof Error ? err.message.slice(0, 300) : String(err),
+        error: [e?.message, stderr].filter(Boolean).join(" — ").slice(0, 400),
       });
     }
   }
