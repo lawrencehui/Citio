@@ -1,7 +1,7 @@
 {
   "name": "citio",
   "version": "0.1.4",
-  "description": "Self-hosted AI coding agents that live in Slack — run Claude Code or Codex in your own infra, ship PRs, and keep every credential behind a controlled MCP tool layer.",
+  "description": "Self-hosted AI coding agents that live in Slack \u2014 run Claude Code or Codex in your own infra, ship PRs, and keep every credential behind a controlled MCP tool layer.",
   "keywords": [
     "slack",
     "ai-agent",
@@ -49,7 +49,8 @@
     "test": "tsx --test test/**/*.test.ts",
     "prepublishOnly": "npm run build",
     "status": "tsx src/cli/init.ts status",
-    "destroy": "tsx src/cli/init.ts destroy"
+    "destroy": "tsx src/cli/init.ts destroy",
+    "manifest": "tsx src/cli/init.ts manifest"
   },
   "dependencies": {
     "@aws-sdk/client-ec2": "^3.1019.0",

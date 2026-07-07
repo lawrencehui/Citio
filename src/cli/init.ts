@@ -1729,6 +1729,14 @@ const subcommand = process.argv[2];
 const entry =
   subcommand === "status" ? statusCommand :
   subcommand === "destroy" ? destroyCommand :
+  subcommand === "manifest" ? async () => {
+    const { writeFileSync } = await import("fs");
+    const json = JSON.stringify(buildCitioSlackManifest(), null, 2);
+    writeFileSync("slack-app-manifest.json", json + "\n");
+    try { execSync("pbcopy", { input: json }); } catch { /* non-mac: file only */ }
+    console.log(json);
+    console.error("\nSaved to slack-app-manifest.json (and copied to clipboard on macOS).\nPaste into api.slack.com/apps -> your app -> App Manifest -> Save.");
+  } :
   subcommand === undefined ? main :
   async () => {
     console.error(`Unknown command "${subcommand}". Usage: citio [status|destroy]`);
