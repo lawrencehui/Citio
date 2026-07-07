@@ -224,6 +224,8 @@ deploy:
 | `CITIO_WORKSPACE`    | Workspace path (default `/workspace`)            |
 | `CITIO_MEMORY`       | Memory/audit path (default `/memory`)            |
 
+> 🔐 **Tokens are not stored as plaintext env vars.** Your Slack, GitHub, and provider tokens are written to an **AWS Secrets Manager** secret (`citio/runtime`) and injected into the container by ECS at start — so they are **not** readable via `ecs:DescribeTaskDefinition`. The values above are non-sensitive runtime config only.
+
 ## 🎛️ Customizing your instance
 
 Yes — a Citio instance is configured almost entirely through `citio.yaml` (the installer writes it for you, and you can hand-edit then redeploy). The main knobs:
