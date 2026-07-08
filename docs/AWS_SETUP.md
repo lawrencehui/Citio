@@ -1,6 +1,6 @@
 # AWS setup for Citio
 
-Citio deploys into **your own AWS account** (ECS Fargate + ECR + optional EFS). This guide takes you from "no AWS CLI" to "ready to run `npx citio`" in ~10 minutes. If `aws sts get-caller-identity` already prints your account, skip to [Permissions](#3-permissions).
+Citio deploys into **your own AWS account** (ECS Fargate + ECR + optional EFS). This guide takes you from "no AWS CLI" to "ready to run `npx @lawrencehui/citio`" in ~10 minutes. If `aws sts get-caller-identity` already prints your account, skip to [Permissions](#3-permissions).
 
 ## 1. Install the AWS CLI
 

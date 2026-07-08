@@ -68,7 +68,7 @@ export async function statusCommand(): Promise<void> {
   // and stopped-task reasons only misleads. Treat as not deployed.
   if (service.status !== "ACTIVE") {
     p.log.info(`The previous service was deleted (status: ${service.status}).`);
-    p.outro("Nothing is deployed. Run the installer (npx citio / npm run init) to deploy fresh.");
+    p.outro("Nothing is deployed. Run the installer (npx @lawrencehui/citio / npm run init) to deploy fresh.");
     return;
   }
 

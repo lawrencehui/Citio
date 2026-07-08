@@ -1154,7 +1154,7 @@ async function deployToAws(config: InitConfig): Promise<boolean> {
   // 3. Build and push Docker image
   s.start("Building Docker image...");
   // From a source checkout, compile dist/ first. When running from an installed
-  // package (e.g. `npx citio`), dist/ ships prebuilt and there is no src/ to compile.
+  // package (e.g. `npx @lawrencehui/citio`), dist/ ships prebuilt and there is no src/ to compile.
   if (existsSync(path.join(projectDir, "src"))) {
     runDeployCommand("npm run build", "Failed to build the TypeScript application before Docker packaging.", { cwd: projectDir });
   }
@@ -1694,7 +1694,7 @@ async function main(): Promise<void> {
     `  ${ok("✓")} A Claude Max/Pro or ChatGPT Go/Plus/Pro login for the agent\n` +
     "\n" +
     `Your answers are saved as you go — if anything fails, re-run\n` +
-    `${cmd("npx citio")} and it resumes with your saved values.`,
+    `${cmd("npx @lawrencehui/citio")} and it resumes with your saved values.`,
     "Before you start"
   );
 

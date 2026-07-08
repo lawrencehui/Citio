@@ -166,8 +166,10 @@ The installer provisions the whole stack (ECR repo, ECS cluster/service, EFS, IA
 **Fastest — one command** (uses the published package, no clone, no build):
 
 ```bash
-npx citio
+npx @lawrencehui/citio
 ```
+
+Installed globally (`npm i -g @lawrencehui/citio`) the command is just `citio`, `citio status`, `citio destroy`.
 
 **Or build from source** (to read/modify the code first, or to contribute):
 
