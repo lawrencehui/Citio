@@ -78,13 +78,27 @@ Use the region closest to you (`us-east-1`, `eu-west-2`, …). The installer aut
 
 ## 5. Costs
 
-Citio's default task (2 vCPU / 8 GB, always-on Fargate) costs roughly **$70–90/month** in most regions, plus pennies for ECR storage and EFS (~$0.30/GB-mo). Not free-tier.
+Fargate bills **per second**, so cost tracks how long the task actually runs:
 
-**Pause it when not in use** (scale to zero):
+| Task size (`citio.yaml` → `deploy.aws`) | ~Always-on / month | Good for |
+|---|---|---|
+| **1 vCPU / 2 GB** (default) | **~$36** | most use; bump memory if a big repo OOMs |
+| 0.5 vCPU / 1 GB (`task_cpu: 512, task_memory: 1024`) | ~$18 | light/personal, small repos |
+| 2 vCPU / 8 GB (`task_cpu: 2048, task_memory: 8192`) | ~$85 | large monorepos / heavy tasks |
+
+Plus pennies for ECR storage and EFS (~$0.30/GB-mo). Not free-tier. Edit the size in `citio.yaml` and redeploy to change it.
+
+**You rarely pay the monthly figure** — two ways to keep it near-zero:
+
 ```bash
-aws ecs update-service --cluster citio --service citio --desired-count 0
-# resume with --desired-count 1
+# Pause when idle — stops compute charges, keeps the deployment + EFS:
+citio pause      # (scales to 0 tasks; Slack goes quiet)
+citio resume     # (~1–2 min to come back)
+
+# Just recording a demo? Deploy, record, then remove everything:
+citio destroy -- --yes --delete-efs
 ```
+A one-hour demo session costs well under **$1**.
 
 ## 6. Teardown
 

@@ -50,7 +50,9 @@
     "prepublishOnly": "npm run build",
     "status": "tsx src/cli/init.ts status",
     "destroy": "tsx src/cli/init.ts destroy",
-    "manifest": "tsx src/cli/init.ts manifest"
+    "manifest": "tsx src/cli/init.ts manifest",
+    "pause": "tsx src/cli/init.ts pause",
+    "resume": "tsx src/cli/init.ts resume"
   },
   "dependencies": {
     "@aws-sdk/client-ec2": "^3.1019.0",

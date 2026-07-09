@@ -214,3 +214,36 @@ export async function destroyCommand(): Promise<void> {
 
   p.outro("Teardown complete. Re-run the installer to deploy fresh.");
 }
+
+// --- citio pause / resume ----------------------------------------------------
+
+export async function pauseCommand(): Promise<void> {
+  const target = loadDeployTarget();
+  p.intro(`Pause Citio — cluster "${target.cluster}" (${target.region})`);
+  const out = tryAws(
+    `ecs update-service --cluster ${target.cluster} --service ${target.service} --desired-count 0 --query 'service.serviceName' --output text`,
+    target
+  );
+  if (out) {
+    p.log.success("Scaled to 0 tasks — Fargate compute charges stop within a minute.");
+    p.log.info("EFS + the deployment stay intact. Resume any time with:  citio resume");
+    p.outro("Paused. (Slack will be unresponsive until you resume.)");
+  } else {
+    p.outro("Could not pause — is it deployed? Try `citio status`.");
+  }
+}
+
+export async function resumeCommand(): Promise<void> {
+  const target = loadDeployTarget();
+  p.intro(`Resume Citio — cluster "${target.cluster}" (${target.region})`);
+  const out = tryAws(
+    `ecs update-service --cluster ${target.cluster} --service ${target.service} --desired-count 1 --query 'service.serviceName' --output text`,
+    target
+  );
+  if (out) {
+    p.log.success("Scaled back to 1 task — it will boot and reconnect to Slack in ~1–2 min.");
+    p.outro("Resuming. Run `citio status` to watch it come up.");
+  } else {
+    p.outro("Could not resume — is it deployed? Try `citio status`.");
+  }
+}

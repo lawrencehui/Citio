@@ -5,7 +5,7 @@ import { execSync, execFileSync } from "child_process";
 import { writeFileSync, readFileSync, existsSync, mkdirSync, chmodSync, unlinkSync } from "fs";
 import path from "path";
 import os from "os";
-import { stringify } from "yaml";
+import { parse, stringify } from "yaml";
 import { extractClaudeOauthTokenFromTranscript, normalizeClaudeOauthToken, validateClaudeOauthToken } from "../utils/claude.js";
 import { loadSavedInstallerState, saveInstallerState } from "../utils/installer-state.js";
 import {
@@ -18,7 +18,7 @@ import {
   validateSlackConfigToken,
 } from "../utils/slack-onboarding.js";
 import { SKILL_REGISTRY, installSkillsTo } from "../core/skills.js";
-import { destroyCommand, statusCommand } from "./ops.js";
+import { destroyCommand, pauseCommand, resumeCommand, statusCommand } from "./ops.js";
 
 interface InitConfig {
   provider: "codex" | "claude";
@@ -947,9 +947,9 @@ function buildYamlConfig(config: InitConfig): Record<string, unknown> {
         ecs_service: "citio",
         profile: config.awsProfile,
         enable_efs: config.enableEfs,
-        task_cpu: 2048,
-        task_memory: 8192,
-        ephemeral_storage_gb: 100,
+        task_cpu: 1024,        // 1 vCPU — cheapest sane default; bump to 2048 for large repos
+        task_memory: 2048,     // 2 GB — raise to 4096/8192 in citio.yaml if the agent OOMs
+        ephemeral_storage_gb: 21,  // 20 GB is free; anything above adds a little cost
       },
     },
   };
@@ -1336,6 +1336,14 @@ async function deployToAws(config: InitConfig): Promise<boolean> {
   // ${ENV} placeholders for tokens — no secrets).
   const configYaml = readFileSync("citio.yaml", "utf-8");
   const configB64 = Buffer.from(configYaml).toString("base64");
+
+  // Task size comes from citio.yaml (edit + redeploy to tune cost). Fallbacks
+  // are the cheapest sane defaults; Fargate requires memory valid for the vCPU.
+  const parsedCfg = parse(configYaml) as { deploy?: { aws?: { task_cpu?: number; task_memory?: number; ephemeral_storage_gb?: number } } };
+  const awsCfg = parsedCfg?.deploy?.aws || {};
+  const taskCpu = String(awsCfg.task_cpu ?? 1024);
+  const taskMemory = String(awsCfg.task_memory ?? 2048);
+  const ephemeralGb = Number(awsCfg.ephemeral_storage_gb ?? 21);
   envVars.push({ name: "CITIO_CONFIG_B64", value: configB64 });
 
   // Secrets injected by ECS from Secrets Manager at container start.
@@ -1369,9 +1377,9 @@ async function deployToAws(config: InitConfig): Promise<boolean> {
     family: "citio",
     networkMode: "awsvpc",
     requiresCompatibilities: ["FARGATE"],
-    cpu: "2048",
-    memory: "8192",
-    ephemeralStorage: { sizeInGiB: 100 },
+    cpu: taskCpu,
+    memory: taskMemory,
+    ...(ephemeralGb > 20 ? { ephemeralStorage: { sizeInGiB: ephemeralGb } } : {}),
     executionRoleArn: `arn:aws:iam::${accountId}:role/citio-task-execution`,
     taskRoleArn: `arn:aws:iam::${accountId}:role/citio-task-execution`,
     volumes: homeVolume ? [homeVolume] : undefined,
@@ -1767,6 +1775,8 @@ async function main(): Promise<void> {
 const subcommand = process.argv[2];
 const entry =
   subcommand === "status" ? statusCommand :
+  subcommand === "pause" ? pauseCommand :
+  subcommand === "resume" ? resumeCommand :
   subcommand === "destroy" ? destroyCommand :
   subcommand === "manifest" ? async () => {
     const { writeFileSync } = await import("fs");
@@ -1778,7 +1788,7 @@ const entry =
   } :
   subcommand === undefined ? main :
   async () => {
-    console.error(`Unknown command "${subcommand}". Usage: citio [status|destroy]`);
+    console.error(`Unknown command "${subcommand}". Usage: citio [status|pause|resume|destroy|manifest]`);
     process.exit(1);
   };
 
