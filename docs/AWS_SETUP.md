@@ -80,13 +80,15 @@ Use the region closest to you (`us-east-1`, `eu-west-2`, …). The installer aut
 
 Fargate bills **per second**, so cost tracks how long the task actually runs:
 
-| Task size (`citio.yaml` → `deploy.aws`) | ~Always-on / month | Good for |
-|---|---|---|
-| **1 vCPU / 2 GB** (default) | **~$36** | most use; bump memory if a big repo OOMs |
-| 0.5 vCPU / 1 GB (`task_cpu: 512, task_memory: 1024`) | ~$18 | light/personal, small repos |
-| 2 vCPU / 8 GB (`task_cpu: 2048, task_memory: 8192`) | ~$85 | large monorepos / heavy tasks |
+Citio runs on **Fargate Spot by default** (~70% cheaper than on-demand). Set `deploy.aws.use_spot: false` in `citio.yaml` for on-demand (no interruptions, higher cost).
 
-Plus pennies for ECR storage and EFS (~$0.30/GB-mo). Not free-tier. Edit the size in `citio.yaml` and redeploy to change it.
+| Task size (`citio.yaml` → `deploy.aws`) | Spot (default) / mo | On-demand / mo | Good for |
+|---|---|---|---|
+| 0.5 vCPU / 1 GB (`task_cpu: 512, task_memory: 1024`) | **~$5** | ~$18 | light/personal, small repos |
+| **1 vCPU / 2 GB** (default) | **~$11** | ~$36 | most use; bump memory if a big repo OOMs |
+| 2 vCPU / 8 GB (`task_cpu: 2048, task_memory: 8192`) | ~$26 | ~$85 | large monorepos / heavy tasks |
+
+Plus pennies for ECR storage and EFS (~$0.30/GB-mo). Not free-tier. Edit the size in `citio.yaml` and redeploy to change it. **Spot note:** AWS can reclaim a Spot task (rare; 2-min warning) — Citio posts a "restarting, please re-send" notice and comes back automatically; fine for a single-instance bot.
 
 **You rarely pay the monthly figure** — two ways to keep it near-zero:
 

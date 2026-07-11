@@ -4,7 +4,7 @@
 
 **Your own AI engineering teammate — self-hosted, living in Slack.**
 
-`@mention` it or DM it and ask for real engineering work — investigate a bug, dig through CloudWatch logs, fix code, open a PR — and Citio runs **Claude Code** or **OpenAI Codex** inside your own infrastructure to do it. Slack is the interface, a controlled MCP tool layer is the safety boundary, and every credential stays in your AWS account.
+`@mention` it or DM it and ask for real engineering work — investigate a bug, dig through CloudWatch logs, fix code, open a PR — and Citio runs **Claude Code** or **OpenAI Codex** inside your own infrastructure to do it. Slack is the interface, a controlled MCP tool layer is the safety boundary, and every credential stays in your own infrastructure.
 
 **No Team or Enterprise plan required.** Citio runs on an individual **Claude Max/Pro** or **ChatGPT Go/Plus/Pro (Codex)** subscription — the agent you already pay for, now working from Slack.
 
@@ -43,9 +43,11 @@ Citio closes that gap:
 - 💬 **Slack is the user interface** — DM the bot or `@mention` it in a channel.
 - 🧠 **Claude Code or Codex is the execution engine** — the provider CLI does the reasoning and planning.
 - 🛡️ **Citio is the control plane** — it owns orchestration, session handling, repo setup, AWS/GitHub access, and a controlled MCP tool layer so the agent never touches raw credentials.
-- 🏠 **Everything runs in your infra** — your container, your AWS account, your keys.
+- 🏠 **Everything runs in your infra** — your container, your cloud account, your keys.
 
 The result is something that can investigate bugs, inspect logs, edit code, and open pull requests — without a human sitting in the middle of every request.
+
+> **Where it runs.** Citio is a self-hosted **container**. This first version ships a native **one-command AWS Fargate** deploy (on **Fargate Spot** by default — ~$5–11/month, or `citio pause` to $0 when idle). Running on other hosts — a **cheap VPS, Fly.io / Railway, or your own homelab** — and a **pay-per-use serverless** mode are on the [roadmap](#️-status--roadmap).
 
 ## 🆚 Citio vs. hosted Slack agents
 
@@ -283,14 +285,15 @@ npm run dev         # run locally with tsx
 
 ## 🗺️ Status & roadmap
 
-Citio is **pre-1.0** — usable for AWS-first self-hosted experimentation.
+Citio is **pre-1.0**. This release deploys natively to **AWS Fargate** (Spot by default for low cost); the container itself is host-agnostic, so more deploy targets are coming.
 
 - ✅ Slack-native control plane for Claude Code / Codex
 - ✅ Controlled MCP tool layer with audit log
-- ✅ One-command ECS installer with optional EFS persistence
+- ✅ One-command AWS Fargate installer (Fargate Spot default) with optional EFS persistence
+- ✅ `citio pause` / `citio resume` / `citio destroy` for cost control
 - ⏳ Not yet a hardened sandbox (provider CLIs retain native shell inside the container)
 - ⏳ One active agent task per container
-- ⏳ Single-cloud (AWS) only
+- ⏳ Native deploy target is **AWS Fargate** today — **on the roadmap:** run on any Docker host (VPS / Fly / Railway / homelab) and a pay-per-use serverless (Slack HTTP → Lambda → on-demand task) mode for ~$1–3/month
 
 Full caveats: [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md)
 

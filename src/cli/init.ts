@@ -950,6 +950,7 @@ function buildYamlConfig(config: InitConfig): Record<string, unknown> {
         task_cpu: 1024,        // 1 vCPU — cheapest sane default; bump to 2048 for large repos
         task_memory: 2048,     // 2 GB — raise to 4096/8192 in citio.yaml if the agent OOMs
         ephemeral_storage_gb: 21,  // 20 GB is free; anything above adds a little cost
+        use_spot: true,        // Fargate Spot (~70% cheaper). false = on-demand (no interruptions)
       },
     },
   };
@@ -1184,7 +1185,12 @@ async function deployToAws(config: InitConfig): Promise<boolean> {
   s.start("Setting up ECS cluster...");
   try {
     execSync(
-      `aws ecs create-cluster --cluster-name citio --region ${region} ${profileFlag} 2>/dev/null || true`,
+      `aws ecs create-cluster --cluster-name citio --capacity-providers FARGATE FARGATE_SPOT --region ${region} ${profileFlag} 2>/dev/null || true`,
+      { encoding: "utf-8" }
+    );
+    // Ensure both providers are attached even if the cluster already existed.
+    execSync(
+      `aws ecs put-cluster-capacity-providers --cluster citio --capacity-providers FARGATE FARGATE_SPOT --default-capacity-provider-strategy capacityProvider=FARGATE,weight=1 --region ${region} ${profileFlag} 2>/dev/null || true`,
       { encoding: "utf-8" }
     );
   } catch {
@@ -1339,11 +1345,12 @@ async function deployToAws(config: InitConfig): Promise<boolean> {
 
   // Task size comes from citio.yaml (edit + redeploy to tune cost). Fallbacks
   // are the cheapest sane defaults; Fargate requires memory valid for the vCPU.
-  const parsedCfg = parse(configYaml) as { deploy?: { aws?: { task_cpu?: number; task_memory?: number; ephemeral_storage_gb?: number } } };
+  const parsedCfg = parse(configYaml) as { deploy?: { aws?: { task_cpu?: number; task_memory?: number; ephemeral_storage_gb?: number; use_spot?: boolean } } };
   const awsCfg = parsedCfg?.deploy?.aws || {};
   const taskCpu = String(awsCfg.task_cpu ?? 1024);
   const taskMemory = String(awsCfg.task_memory ?? 2048);
   const ephemeralGb = Number(awsCfg.ephemeral_storage_gb ?? 21);
+  const useSpot = (awsCfg as { use_spot?: boolean }).use_spot !== false; // default: Spot on
   envVars.push({ name: "CITIO_CONFIG_B64", value: configB64 });
 
   // Secrets injected by ECS from Secrets Manager at container start.
@@ -1536,7 +1543,7 @@ async function deployToAws(config: InitConfig): Promise<boolean> {
         --service-name citio \
         --task-definition citio \
         --desired-count 1 \
-        --launch-type FARGATE \
+        ${useSpot ? "--capacity-provider-strategy capacityProvider=FARGATE_SPOT,weight=1" : "--launch-type FARGATE"} \
         --availability-zone-rebalancing DISABLED \
         --deployment-configuration "maximumPercent=100,minimumHealthyPercent=0" \
         --network-configuration "awsvpcConfiguration={subnets=[${subnetId}],securityGroups=[${sgId}],assignPublicIp=ENABLED}" \
