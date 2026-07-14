@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.0] - 2026-07-07
+## [0.3.0] - 2026-07-14
 
 First public release.
 
@@ -41,5 +41,5 @@ First public release.
 - Task size (CPU, memory, ephemeral storage) is now driven by config rather than
   hardcoded, with a cheaper default and pause/resume support.
 
-[Unreleased]: https://github.com/lawrencehui/Citio/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/lawrencehui/Citio/releases/tag/v0.2.0
+[Unreleased]: https://github.com/lawrencehui/Citio/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/lawrencehui/Citio/releases/tag/v0.3.0
