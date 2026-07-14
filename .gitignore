@@ -13,3 +13,7 @@ citio.yaml
 .claude/settings.local.json
 *.local.md
 slack-app-manifest.json
+
+# Local agent instructions (not shipped)
+/CLAUDE.md
+/AGENTS.md
