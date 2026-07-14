@@ -102,7 +102,8 @@ const PREREQ_GUIDES: Record<string, string> = {
     "    macOS:         brew install awscli\n" +
     "    Ubuntu/Debian: sudo apt install awscli\n" +
     "    Windows:       https://awscli.amazonaws.com/AWSCLIV2.msi\n" +
-    "    Full account + permissions guide: docs/AWS_SETUP.md",
+    "    Full account + permissions guide:\n" +
+    "    https://github.com/lawrencehui/Citio#setting-up-your-aws-profile",
   git:
     "git — clones your repos\n" +
     "    macOS:         xcode-select --install   (or: brew install git)\n" +
@@ -174,7 +175,8 @@ async function ensureAwsCredentials(awsProfile: string): Promise<void> {
         "     and paste the key, secret, and a region (e.g. us-east-1)\n" +
         "  3. Verify:  aws sts get-caller-identity\n" +
         "\n" +
-        "Permissions needed + least-privilege policy: docs/AWS_SETUP.md\n" +
+        "Permissions needed + least-privilege policy:\n" +
+        "https://github.com/lawrencehui/Citio#permissions\n" +
         "(simplest for a personal account: AdministratorAccess)",
         `AWS credentials check failed${awsProfile ? ` (profile: ${awsProfile})` : ""}`
       );
@@ -808,12 +810,13 @@ async function collectConfig(): Promise<InitConfig> {
     "  3. Permissions to create: ECR repo · ECS cluster/service · IAM roles\n" +
     "     (citio-*, incl. iam:PassRole) · security group · CloudWatch logs · EFS\n" +
     "     • Personal account: the AdministratorAccess policy is simplest\n" +
-    "     • Shared/work account: least-privilege policy in docs/AWS_SETUP.md\n" +
+    "     • Shared/work account: least-privilege policy at\n" +
+    "       https://github.com/lawrencehui/Citio#permissions\n" +
     "\n" +
     "You'll pick the profile next; we verify credentials and show WHICH\n" +
     "account you're deploying to before anything is created.\n" +
-    `${warn("Cost note: the default always-on task is ~$70–90/month")} (scale-to-zero\n` +
-    "and teardown commands are in docs/AWS_SETUP.md; `citio destroy` removes it).",
+    `${warn("Cost note: the default task is ~$11/month on Fargate Spot")} — use\n` +
+    "`citio pause` when idle, or `citio destroy` to remove everything.",
     "AWS deployment — what your profile needs"
   );
 
@@ -1705,7 +1708,8 @@ async function main(): Promise<void> {
     `  ${ok("✓")} A Slack workspace where you can create an app\n` +
     `  ${ok("✓")} A GitHub account (we'll create a token together)\n` +
     `  ${ok("✓")} An AWS account + CLI (no CLI or unsure about permissions?\n` +
-    "    see docs/AWS_SETUP.md — we also verify before deploying)\n" +
+    "    see github.com/lawrencehui/Citio#setting-up-your-aws-profile\n" +
+    "    — we also verify before deploying)\n" +
     `  ${ok("✓")} A Claude Max/Pro or ChatGPT Go/Plus/Pro login for the agent\n` +
     "\n" +
     `Your answers are saved as you go — if anything fails, re-run\n` +

@@ -186,4 +186,4 @@ Citio is not yet:
 - multi-agent per container
 - a fully provider-agnostic MCP runtime with identical behavior across CLIs
 
-For current operational caveats, see [docs/KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md).
+For current operational caveats, see [Known limitations](../README.md#known-limitations).

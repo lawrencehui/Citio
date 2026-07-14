@@ -10,7 +10,7 @@
 
 <br/>
 
-[![Status](https://img.shields.io/badge/status-pre--1.0-orange.svg)](docs/KNOWN_LIMITATIONS.md)
+[![Status](https://img.shields.io/badge/status-pre--1.0-orange.svg)](#known-limitations)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A5%2022-339933.svg?logo=node.js&logoColor=white)](package.json)
 [![TypeScript](https://img.shields.io/badge/TypeScript-3178C6.svg?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -106,7 +106,7 @@ More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 | ---- | -------------- |
 | **Node.js** | ≥ 22 |
 | **Docker** | Running. The image is built `linux/amd64` — on Apple Silicon, Docker Desktop's buildx cross-builds it. |
-| **AWS CLI** | v2, authenticated (`aws configure` or `aws sso login`) with a profile that has the permissions below. New to AWS or unsure about permissions? **[docs/AWS_SETUP.md](docs/AWS_SETUP.md)** walks through account, CLI, credentials, a least-privilege IAM policy, costs, and teardown. |
+| **AWS CLI** | v2, authenticated with a profile that has the permissions below — see [Setting up your AWS profile](#setting-up-your-aws-profile). |
 | **Git** | Any recent version. |
 
 > The agent CLIs (`claude`, `codex`), `gh`, and `jq` ship **inside the container image** — you don't install them on the host.
@@ -119,7 +119,55 @@ More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 ### Setting up your AWS profile
 
-Citio deploys into **your** AWS account, so the installer needs an AWS CLI profile with rights to build the stack. What it provisions, and why each permission is needed:
+Citio deploys into **your own** AWS account. This takes about 10 minutes from "no AWS CLI" to "ready to install". If `aws sts get-caller-identity` already prints your account ID, skip to [Permissions](#permissions).
+
+#### 1. Install the AWS CLI
+
+| OS | Command |
+|---|---|
+| **macOS** | `brew install awscli` |
+| **Ubuntu/Debian** | `sudo apt install awscli` (or the [official v2 installer](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)) |
+| **Windows** | [MSI installer](https://awscli.amazonaws.com/AWSCLIV2.msi) |
+
+Verify with `aws --version` (v2.x recommended).
+
+#### 2. Connect the CLI to your account
+
+No AWS account yet? Create one at [aws.amazon.com](https://aws.amazon.com/free/). Then pick **one** route:
+
+**Option A — IAM user + access key** (simplest for a personal account)
+
+1. AWS Console → **IAM → Users → Create user** (e.g. `citio-admin`)
+2. Attach permissions — see [Permissions](#permissions) below
+3. Open the user → **Security credentials → Create access key** → choose *Command Line Interface (CLI)*
+4. Configure the profile:
+
+```bash
+aws configure --profile citio
+# AWS Access Key ID:      AKIA...
+# AWS Secret Access Key:  ...
+# Default region name:    eu-west-2      # any region you like
+# Default output format:  json
+```
+
+**Option B — IAM Identity Center / SSO** (if your org uses it)
+
+```bash
+aws configure sso                  # follow the browser prompts
+aws sso login --profile citio
+```
+
+**Verify either way** — this must print your account ID:
+
+```bash
+aws sts get-caller-identity --profile citio
+```
+
+The installer lists your profiles automatically and re-runs this check before it touches anything.
+
+#### Permissions
+
+The deploy creates an ECR repository, an ECS cluster/service/task definition, an IAM task role, a security group, CloudWatch log groups, a Secrets Manager secret, and (optionally) an EFS filesystem.
 
 | Service | What Citio does with it |
 | ------- | ----------------------- |
@@ -131,32 +179,36 @@ Citio deploys into **your** AWS account, so the installer needs an AWS CLI profi
 | **CloudWatch Logs** | Container logs, plus the agent's `query_logs` tool. |
 | **EFS** *(optional)* | Persists agent credentials and workspace across restarts. |
 
-**Which profile to use**
+**Simplest (personal/sandbox account):** attach the AWS-managed **`AdministratorAccess`** policy to your IAM user and skip the JSON below.
 
-- **Quickest** — an **admin-capable profile in a dev/sandbox account**. Fine for trying Citio out.
-- **Least privilege** — create a dedicated IAM user or role and attach the ready-made policy in **[docs/AWS_SETUP.md](docs/AWS_SETUP.md)**, which lists the exact actions and nothing more.
+**Least-privilege (shared or work account):** attach this policy instead — it is scoped to exactly what the installer calls, and nothing more.
 
-**Configure the CLI**
+<details>
+<summary><b>Least-privilege IAM policy</b> (click to expand)</summary>
 
-```bash
-aws configure --profile citio
-# AWS Access Key ID:      AKIA...
-# AWS Secret Access Key:  ...
-# Default region name:    eu-west-2      # any region you like
-# Default output format:  json
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Sid": "STS",  "Effect": "Allow", "Action": ["sts:GetCallerIdentity"], "Resource": "*" },
+    { "Sid": "ECR",  "Effect": "Allow", "Action": ["ecr:GetAuthorizationToken", "ecr:CreateRepository", "ecr:DescribeRepositories", "ecr:BatchCheckLayerAvailability", "ecr:InitiateLayerUpload", "ecr:UploadLayerPart", "ecr:CompleteLayerUpload", "ecr:PutImage", "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"], "Resource": "*" },
+    { "Sid": "ECS",  "Effect": "Allow", "Action": ["ecs:CreateCluster", "ecs:RegisterTaskDefinition", "ecs:CreateService", "ecs:UpdateService", "ecs:DescribeServices", "ecs:DescribeTasks", "ecs:ListTasks", "ecs:RunTask"], "Resource": "*" },
+    { "Sid": "EFS",  "Effect": "Allow", "Action": ["elasticfilesystem:CreateFileSystem", "elasticfilesystem:DescribeFileSystems", "elasticfilesystem:CreateMountTarget", "elasticfilesystem:DescribeMountTargets"], "Resource": "*" },
+    { "Sid": "EC2",  "Effect": "Allow", "Action": ["ec2:DescribeVpcs", "ec2:DescribeSubnets", "ec2:DescribeSecurityGroups", "ec2:CreateSecurityGroup", "ec2:AuthorizeSecurityGroupIngress"], "Resource": "*" },
+    { "Sid": "Logs", "Effect": "Allow", "Action": ["logs:CreateLogGroup", "logs:DescribeLogGroups", "logs:GetLogEvents", "logs:FilterLogEvents", "logs:StartLiveTail"], "Resource": "*" },
+    { "Sid": "Secrets", "Effect": "Allow", "Action": ["secretsmanager:CreateSecret", "secretsmanager:PutSecretValue", "secretsmanager:DescribeSecret", "secretsmanager:DeleteSecret"], "Resource": "arn:aws:secretsmanager:*:*:secret:citio/*" },
+    { "Sid": "IAM",  "Effect": "Allow", "Action": ["iam:CreateRole", "iam:GetRole", "iam:PutRolePolicy", "iam:AttachRolePolicy", "iam:PassRole"], "Resource": "arn:aws:iam::*:role/citio*" }
+  ]
+}
 ```
 
-Using SSO instead? `aws sso login --profile citio` works the same way.
+</details>
 
-**Verify before you install** — if this prints your account ID, you're ready:
+> **The one people miss:** `iam:PassRole` scoped to `role/citio*`. Without it the ECS task can't assume the role the installer just created, and the deploy fails with `AccessDenied`.
 
-```bash
-aws sts get-caller-identity --profile citio
-```
+#### Region
 
-The installer will ask which profile and region to use, and re-checks these credentials before it touches anything.
-
-> **New to AWS?** [docs/AWS_SETUP.md](docs/AWS_SETUP.md) walks through the whole thing end to end — creating the account, the CLI, credentials, the least-privilege policy, expected costs, and teardown.
+Use whichever region is closest to you. The installer auto-detects your CLI's default and offers it. All Citio resources land in **one** region — remember which, for teardown.
 
 ### Install and run
 
@@ -185,6 +237,50 @@ Both launch the **same** guided installer, which will:
 - let you select which repos the agent can work on
 - write a local `citio.yaml`
 - build the image and deploy it to AWS ECS
+
+## 💰 What it costs
+
+Citio runs on **Fargate Spot by default — roughly 70% cheaper** than on-demand. Fargate bills per second, so cost tracks how long the task actually runs.
+
+| Task size (`citio.yaml` → `deploy.aws`) | Spot (default) | On-demand | Good for |
+|---|---|---|---|
+| 0.5 vCPU / 1 GB (`task_cpu: 512, task_memory: 1024`) | **~$5/mo** | ~$18/mo | light/personal, small repos |
+| **1 vCPU / 2 GB** *(default)* | **~$11/mo** | ~$36/mo | most use; bump memory if a big repo OOMs |
+| 2 vCPU / 8 GB (`task_cpu: 2048, task_memory: 8192`) | ~$26/mo | ~$85/mo | large monorepos / heavy tasks |
+
+Plus pennies for ECR storage and EFS (~$0.30/GB-mo). Not free-tier.
+
+**You rarely pay the monthly figure.** Two ways to keep it near zero:
+
+```bash
+citio pause      # scale to 0 tasks — compute charges stop, deployment + EFS stay
+citio resume     # back in ~1–2 min
+
+citio destroy -- --yes --delete-efs    # remove everything
+```
+
+A one-hour demo session costs well under **$1**.
+
+> **Spot note:** AWS can reclaim a Spot task (rare, 2-minute warning). Citio posts a "restarting, please re-send" notice and comes back automatically — fine for a single-instance bot. Want no interruptions? Set `deploy.aws.use_spot: false` in `citio.yaml` for on-demand.
+
+### Teardown
+
+```bash
+citio destroy -- --yes --delete-efs
+```
+
+Or by hand, if you'd rather see every call:
+
+```bash
+aws ecs update-service --cluster citio --service citio --desired-count 0
+aws ecs delete-service --cluster citio --service citio
+aws ecs delete-cluster --cluster citio
+aws ecr delete-repository --repository-name citio --force
+aws secretsmanager delete-secret --secret-id citio/runtime --force-delete-without-recovery
+# if you enabled EFS (find the ID first):
+aws efs describe-file-systems --creation-token citio-memory --query 'FileSystems[0].FileSystemId'
+aws efs delete-file-system --file-system-id <fs-...>   # delete mount targets first if prompted
+```
 
 ## ⚙️ Configuration
 
@@ -290,7 +386,38 @@ Citio is **pre-1.0**. This release deploys natively to **AWS Fargate** (Spot by 
 - ⏳ One active agent task per container
 - ⏳ Native deploy target is **AWS Fargate** today — **on the roadmap:** run on any Docker host (VPS / Fly / Railway / homelab) and a pay-per-use serverless (Slack HTTP → Lambda → on-demand task) mode for ~$1–3/month
 
-Full caveats: [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md)
+### Known limitations
+
+Citio is not a fully hardened multi-cloud platform yet. Treat this release as **AWS-first and pre-1.0**. Read this before deploying anywhere sensitive.
+
+**Security and isolation**
+- Citio is a control plane, but the provider CLIs **still retain native shell capabilities inside the container**. The MCP tool layer is safer than handing an agent raw credentials — but it is **not a policy-grade sandbox**. Run it in an account you're willing to let an agent act in.
+- The installer stores secrets in your OS keychain when available, with a file fallback where no keychain backend exists.
+
+**Runtime and sessions**
+- One active agent task runs at a time per container — intentional; the provider session is container-scoped.
+- Provider sessions don't survive a container restart or redeploy. Citio retries a failed resume as a fresh session, but provider-side conversation state is ephemeral.
+- Workspace state persists across redeploys **only** when EFS persistence is enabled.
+
+**Providers**
+- Claude and Codex are both supported, but not symmetric: Claude uses `CLAUDE_CODE_OAUTH_TOKEN` or an API key; Codex OAuth depends on a persisted `~/.codex/auth.json`.
+- Codex still relies on the CLI's native execution model — its surface isn't as clean as Claude's `--mcp-config`.
+
+**Installer and deployment**
+- The interactive installer is meant for a **trusted operator machine**, not CI/CD runners.
+- Local `citio.yaml` is local machine state — don't commit it.
+
+## 🧯 Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `Unable to locate credentials` | Run `aws configure --profile citio` — see [Setting up your AWS profile](#setting-up-your-aws-profile). |
+| `ExpiredToken` / SSO session expired | `aws sso login --profile citio` |
+| `AccessDenied` on **`iam:PassRole`** | Your profile is missing the `IAM` statement. Attach the [least-privilege policy](#permissions) — this is the most common failure. |
+| `AccessDenied` on **`secretsmanager:*`** | Same cause: add the `Secrets` statement. Citio stores tokens in `citio/runtime`, not in plaintext env vars. |
+| Docker push fails: `no basic auth credentials` | The installer logs into ECR for you. By hand: `aws ecr get-login-password \| docker login --username AWS --password-stdin <account>.dkr.ecr.<region>.amazonaws.com` |
+| Deploy succeeds but Slack is silent | Check the app has `assistant_thread_started` events subscribed — re-paste the manifest from `citio manifest`. |
+| Costs higher than expected | You may be on on-demand. Confirm `deploy.aws.use_spot` isn't `false` in `citio.yaml`, and use `citio pause` when idle. |
 
 ## 🙌 Contributing
 
@@ -298,7 +425,19 @@ Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Keep diffs
 
 ## 🛡️ Security
 
-Found a vulnerability? Please report it privately — see [SECURITY.md](SECURITY.md). Don't open a public issue for credential handling, auth bypass, shell injection, or sandbox escape.
+**How credentials are handled**
+
+- Your Slack, GitHub, and provider tokens live in **AWS Secrets Manager** (`citio/runtime`) — never as plaintext task-definition environment variables, and never baked into the Docker image.
+- The agent reaches your systems through the **MCP tool layer**, not by holding credentials itself. `run_command` is allowlisted and rejects shell metacharacters.
+- Everything runs in **your** AWS account. No third party sees your code or tokens.
+
+**What Citio is not**
+
+It is **not a hardened sandbox**. The provider CLIs keep native shell access inside the container — see [Known limitations](#known-limitations). Deploy it into an account you're comfortable letting an agent act in.
+
+**Reporting**
+
+Found a vulnerability? Report it privately — see [SECURITY.md](SECURITY.md). Please don't open a public issue for credential handling, auth bypass, shell injection, or sandbox escape.
 
 ## 📄 License
 
