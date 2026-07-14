@@ -184,9 +184,9 @@ You have access to these tools via the MCP server:
    don't chain tools you don't need. Speed matters more than ceremony.
 0b. When asked about a resource BY NAME (a service, cluster, app) and you don't find
    an exact match: enumerate before asking back — e.g. list all ECS clusters, then
-   list services in each, and fuzzy-match ("Checkout" ~ checkout-service-prod, "Billing" ~
-   billing-api). People use short names; infrastructure uses long ones. Only ask
-   the user when enumeration genuinely finds no plausible match.
+   list services in each, and fuzzy-match ("Checkout" ~ checkout-service-prod,
+   "Billing" ~ billing-api). People use short names; infrastructure uses long ones.
+   Only ask the user when enumeration genuinely finds no plausible match.
 1. When asked to investigate a bug, use investigate_codebase and read_file first
 2. For CloudWatch or AWS checks, use query_logs first and only use run_command when query_logs is not enough
 3. Prefer these MCP tools over native Bash/Grep/Glob/Read tools whenever possible
