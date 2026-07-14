@@ -117,51 +117,46 @@ More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - A **Slack app** (the installer can create it for you from a config token) + the target channel ID.
 - A **GitHub fine-grained PAT** with `contents: write` + `pull_requests: write` on the repos you want worked on.
 
-**Minimum AWS profile permissions**
+### Setting up your AWS profile
 
-The installer provisions the whole stack (ECR repo, ECS cluster/service, EFS, IAM roles, a security group) and reads logs, so the deploying profile needs create/manage rights across those services. Easiest path: use an **admin-capable profile in a dev/sandbox account**. For least privilege, this inline policy covers exactly what the installer calls:
+Citio deploys into **your** AWS account, so the installer needs an AWS CLI profile with rights to build the stack. What it provisions, and why each permission is needed:
 
-<details>
-<summary>Least-privilege IAM policy (click to expand)</summary>
+| Service | What Citio does with it |
+| ------- | ----------------------- |
+| **ECR** | Pushes the Citio container image to a private repo. |
+| **ECS** | Creates the cluster, task definition, and Fargate service that runs the agent. |
+| **EC2** | Creates one security group in your default VPC. |
+| **IAM** | Creates the task role the container runs as (scoped to `role/citio*`). |
+| **Secrets Manager** | Stores your Slack / GitHub / provider tokens in `citio/runtime` — never as plaintext task-definition env vars. |
+| **CloudWatch Logs** | Container logs, plus the agent's `query_logs` tool. |
+| **EFS** *(optional)* | Persists agent credentials and workspace across restarts. |
 
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    { "Sid": "Identity", "Effect": "Allow", "Action": ["sts:GetCallerIdentity"], "Resource": "*" },
-    { "Sid": "Ecr", "Effect": "Allow", "Action": [
-      "ecr:CreateRepository", "ecr:GetAuthorizationToken",
-      "ecr:BatchCheckLayerAvailability", "ecr:InitiateLayerUpload",
-      "ecr:UploadLayerPart", "ecr:CompleteLayerUpload", "ecr:PutImage",
-      "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"
-    ], "Resource": "*" },
-    { "Sid": "Ecs", "Effect": "Allow", "Action": [
-      "ecs:CreateCluster", "ecs:RegisterTaskDefinition", "ecs:CreateService",
-      "ecs:UpdateService", "ecs:DescribeServices", "ecs:DescribeTasks",
-      "ecs:ListTasks", "ecs:RunTask"
-    ], "Resource": "*" },
-    { "Sid": "Efs", "Effect": "Allow", "Action": [
-      "elasticfilesystem:CreateFileSystem", "elasticfilesystem:DescribeFileSystems",
-      "elasticfilesystem:CreateMountTarget", "elasticfilesystem:DescribeMountTargets"
-    ], "Resource": "*" },
-    { "Sid": "Iam", "Effect": "Allow", "Action": [
-      "iam:CreateRole", "iam:AttachRolePolicy", "iam:PutRolePolicy", "iam:PassRole"
-    ], "Resource": "*" },
-    { "Sid": "Ec2", "Effect": "Allow", "Action": [
-      "ec2:CreateSecurityGroup", "ec2:DescribeSecurityGroups",
-      "ec2:DescribeSubnets", "ec2:DescribeVpcs"
-    ], "Resource": "*" },
-    { "Sid": "Logs", "Effect": "Allow", "Action": [
-      "logs:FilterLogEvents", "logs:GetLogEvents",
-      "logs:DescribeLogGroups", "logs:DescribeLogStreams", "logs:StartLiveTail"
-    ], "Resource": "*" }
-  ]
-}
+**Which profile to use**
+
+- **Quickest** — an **admin-capable profile in a dev/sandbox account**. Fine for trying Citio out.
+- **Least privilege** — create a dedicated IAM user or role and attach the ready-made policy in **[docs/AWS_SETUP.md](docs/AWS_SETUP.md)**, which lists the exact actions and nothing more.
+
+**Configure the CLI**
+
+```bash
+aws configure --profile citio
+# AWS Access Key ID:      AKIA...
+# AWS Secret Access Key:  ...
+# Default region name:    eu-west-2      # any region you like
+# Default output format:  json
 ```
 
-`iam:PassRole` is required because the ECS task definition references the `citio-task-execution` role. Scope `Resource` down to your account/region ARNs for production.
+Using SSO instead? `aws sso login --profile citio` works the same way.
 
-</details>
+**Verify before you install** — if this prints your account ID, you're ready:
+
+```bash
+aws sts get-caller-identity --profile citio
+```
+
+The installer will ask which profile and region to use, and re-checks these credentials before it touches anything.
+
+> **New to AWS?** [docs/AWS_SETUP.md](docs/AWS_SETUP.md) walks through the whole thing end to end — creating the account, the CLI, credentials, the least-privilege policy, expected costs, and teardown.
 
 ### Install and run
 
