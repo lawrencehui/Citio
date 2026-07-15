@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-07-15
+
+### Fixed
+
+- Installer quoted a stale cost figure (~$70–90/month) for the default task;
+  the Fargate Spot default is ~$11/month.
+- Installer linked to `docs/AWS_SETUP.md`, which doesn't exist for users who
+  install via `npx`; it now links to the setup guide in the README.
+
+### Changed
+
+- Consolidated AWS setup, costs, teardown, known limitations, and
+  troubleshooting into the README as the single source of truth (removed the
+  separate `docs/AWS_SETUP.md` and `docs/KNOWN_LIMITATIONS.md`).
+
 ## [0.3.0] - 2026-07-14
 
 First public release.
@@ -41,5 +56,6 @@ First public release.
 - Task size (CPU, memory, ephemeral storage) is now driven by config rather than
   hardcoded, with a cheaper default and pause/resume support.
 
-[Unreleased]: https://github.com/lawrencehui/Citio/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/lawrencehui/Citio/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/lawrencehui/Citio/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/lawrencehui/Citio/releases/tag/v0.3.0
