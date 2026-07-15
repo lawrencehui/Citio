@@ -74,16 +74,25 @@ If you already pay for a Claude or ChatGPT subscription, Citio puts that same ag
 
 ## 🏗️ How it works
 
-```mermaid
-flowchart TD
-    A["Slack DM or @mention"] --> B["SlackAdapter"]
-    B --> C["AgentRunner"]
-    C --> D["Claude Code or Codex CLI"]
-    D --> E["Citio MCP Server"]
-    E --> F["GitHub repos in persistent workspace"]
-    E --> G["GitHub PR / CI operations"]
-    E --> H["AWS CloudWatch / ECS reads"]
-    E --> I["Persistent org memory"]
+```text
+   Slack DM or @mention
+            │
+            ▼
+       SlackAdapter
+            │
+            ▼
+       AgentRunner            (serializes work, 1 task per container)
+            │
+            ▼
+  Claude Code / Codex CLI     (the reasoning agent)
+            │
+            ▼
+     Citio MCP Server         (owns every credential)
+            │
+   ┌────────┼────────────┬─────────────────┐
+   ▼        ▼            ▼                 ▼
+ GitHub   GitHub PR   AWS CloudWatch   Persistent
+ repos    / CI ops    / ECS reads      org memory
 ```
 
 Runtime shape:

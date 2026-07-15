@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-07-15
+
+### Fixed
+
+- Replaced the Mermaid architecture diagram with a plain-text one. npm's README
+  renderer doesn't support Mermaid, so the diagram showed as raw code on the
+  package page; the text version renders everywhere.
+
 ## [0.3.1] - 2026-07-15
 
 ### Fixed
