@@ -74,26 +74,7 @@ If you already pay for a Claude or ChatGPT subscription, Citio puts that same ag
 
 ## 🏗️ How it works
 
-```text
-   Slack DM or @mention
-            │
-            ▼
-       SlackAdapter
-            │
-            ▼
-       AgentRunner            (serializes work, 1 task per container)
-            │
-            ▼
-  Claude Code / Codex CLI     (the reasoning agent)
-            │
-            ▼
-     Citio MCP Server         (owns every credential)
-            │
-   ┌────────┼────────────┬─────────────────┐
-   ▼        ▼            ▼                 ▼
- GitHub   GitHub PR   AWS CloudWatch   Persistent
- repos    / CI ops    / ECS reads      org memory
-```
+![Citio architecture — Slack to agent to MCP tool layer](docs/screenshots/architecture.png)
 
 Runtime shape:
 
