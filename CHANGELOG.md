@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-07-16
+
+### Fixed
+
+- **Codex replies are no longer walls of text.** Codex narrates each step as
+  its own message; the runner appended every one into the final Slack reply.
+  Now only the final message is the reply, and intermediate narration feeds
+  the transient progress display.
+
+### Changed
+
+- README: demo GIF, screenshots (installer, Slack, PR), and a rendered
+  architecture diagram.
+
 ## [0.3.2] - 2026-07-15
 
 ### Fixed

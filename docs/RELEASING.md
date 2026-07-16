@@ -1,12 +1,7 @@
 # Releasing Citio
 
-## Before the first release
-
-1. Create the GitHub repository and add a real remote:
-   - `git remote add origin <repo-url>`
-2. Configure GitHub Actions secrets:
-   - `NPM_TOKEN` if you want tag pushes to publish to npm
-3. Confirm the package metadata in `package.json` is correct for public publishing.
+Releases publish to npm automatically: push a `v*` tag and the `Release`
+workflow does the rest (requires the `NPM_TOKEN` repo secret, already set).
 
 ## Local release flow
 
