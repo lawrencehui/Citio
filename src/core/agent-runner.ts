@@ -364,7 +364,7 @@ export class AgentRunner {
             if (!line.trim()) continue;
             try {
               const event = JSON.parse(line) as Record<string, unknown>;
-              this.handleCodexEvent(event, task, (text) => { finalResult += text; });
+              this.handleCodexEvent(event, task, (text) => { finalResult = text; });
             } catch {
               finalResult += line;
               task.onProgress?.(line);
@@ -382,7 +382,7 @@ export class AgentRunner {
           if (lineBuffer.trim()) {
             try {
               const event = JSON.parse(lineBuffer) as Record<string, unknown>;
-              this.handleCodexEvent(event, task, (text) => { finalResult += text; });
+              this.handleCodexEvent(event, task, (text) => { finalResult = text; });
             } catch {
               finalResult += lineBuffer;
             }
@@ -488,7 +488,7 @@ export class AgentRunner {
   private handleCodexEvent(
     event: Record<string, unknown>,
     task: QueuedTask,
-    appendResult: (text: string) => void
+    setResult: (text: string) => void
   ): void {
     const type = event.type as string | undefined;
 
@@ -511,7 +511,11 @@ export class AgentRunner {
       } | undefined;
 
       if (item?.type === "agent_message" && item.text) {
-        appendResult(item.text);
+        // Codex narrates each step as its own agent_message; only the last
+        // one is the actual answer. Keep the latest as the reply and surface
+        // the rest as transient progress so they never stack up in Slack.
+        task.onProgress?.(item.text);
+        setResult(item.text);
       } else if (item?.type === "mcp_tool_call" && item.server && item.tool && task.onProgress) {
         const resultText = this.extractCodexToolResultText(event);
         task.onProgress(item.error
