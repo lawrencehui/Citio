@@ -14,4 +14,4 @@
 - [ ] `npm run test` passes
 - [ ] No credentials, account IDs, or local machine state are committed
 - [ ] Docs/README updated if behavior or configuration changed
-- [ ] Changes are scoped — no unrelated refactors or dead code
+- [ ] Changes are scoped, no unrelated refactors or dead code

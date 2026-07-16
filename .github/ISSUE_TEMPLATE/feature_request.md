@@ -16,4 +16,4 @@ What you'd like to happen.
 Any alternative approaches you've thought about.
 
 **Additional context**
-Anything else — links, screenshots, or related discussion.
+Anything else, links, screenshots, or related discussion.

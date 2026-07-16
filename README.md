@@ -2,11 +2,11 @@
 
 # 🤖 Citio
 
-**Your own AI engineering teammate — self-hosted, living in Slack.**
+**Your own AI engineering teammate, self-hosted, living in Slack.**
 
-`@mention` it or DM it and ask for real engineering work — investigate a bug, dig through CloudWatch logs, fix code, open a PR — and Citio runs **Claude Code** or **OpenAI Codex** inside your own infrastructure to do it. Slack is the interface, a controlled MCP tool layer is the safety boundary, and every credential stays in your own infrastructure.
+`@mention` it or DM it and ask for real engineering work (investigate a bug, dig through CloudWatch logs, fix code, open a PR) and Citio runs **Claude Code** or **OpenAI Codex** inside your own infrastructure to do it. Slack is the interface, a controlled MCP tool layer is the safety boundary, and every credential stays in your own infrastructure.
 
-**No Team or Enterprise plan required.** Citio runs on an individual **Claude Max/Pro** or **ChatGPT Go/Plus/Pro (Codex)** subscription — the agent you already pay for, now working from Slack.
+**No Team or Enterprise plan required.** Citio runs on an individual **Claude Max/Pro** or **ChatGPT Go/Plus/Pro (Codex)** subscription, the agent you already pay for, now working from Slack.
 
 <br/>
 
@@ -28,7 +28,7 @@
 
 ![Citio turning a Slack message into a pull request](docs/screenshots/demo.gif)
 
-*A Slack message becomes an investigated, tested pull request — without leaving the thread.*
+*A Slack message becomes an investigated, tested pull request, without leaving the thread.*
 
 </div>
 
@@ -40,18 +40,18 @@ Most teams can already chat with an LLM. The harder problem is letting a team as
 
 Citio closes that gap:
 
-- 💬 **Slack is the user interface** — DM the bot or `@mention` it in a channel.
-- 🧠 **Claude Code or Codex is the execution engine** — the provider CLI does the reasoning and planning.
-- 🛡️ **Citio is the control plane** — it owns orchestration, session handling, repo setup, AWS/GitHub access, and a controlled MCP tool layer so the agent never touches raw credentials.
-- 🏠 **Everything runs in your infra** — your container, your cloud account, your keys.
+- 💬 **Slack is the user interface**: DM the bot or `@mention` it in a channel.
+- 🧠 **Claude Code or Codex is the execution engine**: the provider CLI does the reasoning and planning.
+- 🛡️ **Citio is the control plane**: it owns orchestration, session handling, repo setup, AWS/GitHub access, and a controlled MCP tool layer so the agent never touches raw credentials.
+- 🏠 **Everything runs in your infra**: your container, your cloud account, your keys.
 
-The result is something that can investigate bugs, inspect logs, edit code, and open pull requests — without a human sitting in the middle of every request.
+The result is something that can investigate bugs, inspect logs, edit code, and open pull requests, without a human sitting in the middle of every request.
 
-> **Where it runs.** Citio is a self-hosted **container**. This first version ships a native **one-command AWS Fargate** deploy (on **Fargate Spot** by default — ~$5–11/month, or `citio pause` to $0 when idle). Running on other hosts — a **cheap VPS, Fly.io / Railway, or your own homelab** — and a **pay-per-use serverless** mode are on the [roadmap](#️-status--roadmap).
+> **Where it runs.** Citio is a self-hosted **container**. This first version ships a native **one-command AWS Fargate** deploy (on **Fargate Spot** by default, ~$5–11/month, or `citio pause` to $0 when idle). Running on other hosts (a **cheap VPS, Fly.io / Railway, or your own homelab**) and a **pay-per-use serverless** mode are on the [roadmap](#️-status--roadmap).
 
 ## 🆚 Citio vs. hosted Slack agents
 
-Anthropic's [Claude Tag](https://techcrunch.com/2026/06/23/anthropics-claude-tag-is-learning-your-company-one-slack-message-at-a-time/) (June 2026) popularized exactly this idea — `@mention` an AI teammate in Slack and it does the work in-thread — but it's an Anthropic-hosted service gated to **Claude Team and Enterprise** plans, Claude-only. Citio takes the self-hosted, bring-your-own-subscription path:
+Anthropic's [Claude Tag](https://techcrunch.com/2026/06/23/anthropics-claude-tag-is-learning-your-company-one-slack-message-at-a-time/) (June 2026) popularized exactly this idea (`@mention` an AI teammate in Slack and it does the work in-thread), but it's an Anthropic-hosted service gated to **Claude Team and Enterprise** plans, Claude-only. Citio takes the self-hosted, bring-your-own-subscription path:
 
 |                    | **Citio**                                          | **Claude Tag**                       |
 | ------------------ | -------------------------------------------------- | ------------------------------------ |
@@ -61,27 +61,27 @@ Anthropic's [Claude Tag](https://techcrunch.com/2026/06/23/anthropics-claude-tag
 | **Credentials**    | Stay with you, behind an MCP allowlist             | Managed by the vendor                |
 | **Best for**       | Solo devs & small teams who self-host              | Orgs already on Team/Enterprise      |
 
-If you already pay for a Claude or ChatGPT subscription, Citio puts that same agent to work from Slack — no per-seat enterprise upgrade, no handing your code and credentials to someone else's cloud.
+If you already pay for a Claude or ChatGPT subscription, Citio puts that same agent to work from Slack, no per-seat enterprise upgrade, no handing your code and credentials to someone else's cloud.
 
 ## 🧩 Features
 
-- 🤝 **Bring your own agent** — Claude Code or OpenAI Codex, your subscription or API key.
-- 🧰 **Controlled MCP tools** — `investigate_codebase`, `read_file`, `write_file`, `create_branch`, `create_pr`, `run_command` (allowlisted), `check_ci_status`, `query_logs`, `recall_context`, and more.
-- 🔐 **Credential boundary** — the agent calls MCP tools; secrets live with Citio, not the model. Command execution is allowlisted and shell-metacharacter-rejected.
-- 🧵 **Slack-native** — DMs and channel mentions, streamed progress, redacted output.
-- 💾 **Persistent workspace & memory** — optional AWS EFS keeps repos, sessions, and provider auth across redeploys.
-- 🪄 **One-command installer** — interactive setup wires up Slack, GitHub, provider auth, and deploys to ECS.
+- 🤝 **Bring your own agent**: Claude Code or OpenAI Codex, your subscription or API key.
+- 🧰 **Controlled MCP tools**: `investigate_codebase`, `read_file`, `write_file`, `create_branch`, `create_pr`, `run_command` (allowlisted), `check_ci_status`, `query_logs`, `recall_context`, and more.
+- 🔐 **Credential boundary**: the agent calls MCP tools; secrets live with Citio, not the model. Command execution is allowlisted and shell-metacharacter-rejected.
+- 🧵 **Slack-native**: DMs and channel mentions, streamed progress, redacted output.
+- 💾 **Persistent workspace & memory**: optional AWS EFS keeps repos, sessions, and provider auth across redeploys.
+- 🪄 **One-command installer**: interactive setup wires up Slack, GitHub, provider auth, and deploys to ECS.
 
 ## 🏗️ How it works
 
-![Citio architecture — Slack to agent to MCP tool layer](docs/screenshots/architecture.png)
+![Citio architecture, Slack to agent to MCP tool layer](docs/screenshots/architecture.png)
 
 Runtime shape:
 
 1. A Slack request is normalized by the **Slack adapter**.
 2. **AgentRunner** serializes work and manages provider sessions (one active task per container).
 3. It spawns the **Claude Code / Codex CLI** as the agent, wired to Citio's **MCP server** via `--mcp-config`.
-4. The agent uses MCP tools for codebase reads/writes, PR creation, log queries, and progress updates — never raw credentials.
+4. The agent uses MCP tools for codebase reads/writes, PR creation, log queries, and progress updates, never raw credentials.
 5. Workspace, memory, and auth persist through **EFS** when enabled.
 
 More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
@@ -95,11 +95,11 @@ More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 | Tool | Version / note |
 | ---- | -------------- |
 | **Node.js** | ≥ 22 |
-| **Docker** | Running. The image is built `linux/amd64` — on Apple Silicon, Docker Desktop's buildx cross-builds it. |
-| **AWS CLI** | v2, authenticated with a profile that has the permissions below — see [Setting up your AWS profile](#setting-up-your-aws-profile). |
+| **Docker** | Running. The image is built `linux/amd64`: on Apple Silicon, Docker Desktop's buildx cross-builds it. |
+| **AWS CLI** | v2, authenticated with a profile that has the permissions below, see [Setting up your AWS profile](#setting-up-your-aws-profile). |
 | **Git** | Any recent version. |
 
-> The agent CLIs (`claude`, `codex`), `gh`, and `jq` ship **inside the container image** — you don't install them on the host.
+> The agent CLIs (`claude`, `codex`), `gh`, and `jq` ship **inside the container image**: you don't install them on the host.
 
 **Accounts & tokens**
 
@@ -125,10 +125,10 @@ Verify with `aws --version` (v2.x recommended).
 
 No AWS account yet? Create one at [aws.amazon.com](https://aws.amazon.com/free/). Then pick **one** route:
 
-**Option A — IAM user + access key** (simplest for a personal account)
+**Option A: IAM user + access key** (simplest for a personal account)
 
 1. AWS Console → **IAM → Users → Create user** (e.g. `citio-admin`)
-2. Attach permissions — see [Permissions](#permissions) below
+2. Attach permissions (see [Permissions](#permissions) below)
 3. Open the user → **Security credentials → Create access key** → choose *Command Line Interface (CLI)*
 4. Configure the profile:
 
@@ -140,14 +140,14 @@ aws configure --profile citio
 # Default output format:  json
 ```
 
-**Option B — IAM Identity Center / SSO** (if your org uses it)
+**Option B: IAM Identity Center / SSO** (if your org uses it)
 
 ```bash
 aws configure sso                  # follow the browser prompts
 aws sso login --profile citio
 ```
 
-**Verify either way** — this must print your account ID:
+**Verify either way**: this must print your account ID:
 
 ```bash
 aws sts get-caller-identity --profile citio
@@ -165,13 +165,13 @@ The deploy creates an ECR repository, an ECS cluster/service/task definition, an
 | **ECS** | Creates the cluster, task definition, and Fargate service that runs the agent. |
 | **EC2** | Creates one security group in your default VPC. |
 | **IAM** | Creates the task role the container runs as (scoped to `role/citio*`). |
-| **Secrets Manager** | Stores your Slack / GitHub / provider tokens in `citio/runtime` — never as plaintext task-definition env vars. |
+| **Secrets Manager** | Stores your Slack / GitHub / provider tokens in `citio/runtime`: never as plaintext task-definition env vars. |
 | **CloudWatch Logs** | Container logs, plus the agent's `query_logs` tool. |
 | **EFS** *(optional)* | Persists agent credentials and workspace across restarts. |
 
 **Simplest (personal/sandbox account):** attach the AWS-managed **`AdministratorAccess`** policy to your IAM user and skip the JSON below.
 
-**Least-privilege (shared or work account):** attach this policy instead — it is scoped to exactly what the installer calls, and nothing more.
+**Least-privilege (shared or work account):** attach this policy instead; it is scoped to exactly what the installer calls, and nothing more.
 
 <details>
 <summary><b>Least-privilege IAM policy</b> (click to expand)</summary>
@@ -198,11 +198,11 @@ The deploy creates an ECR repository, an ECS cluster/service/task definition, an
 
 #### Region
 
-Use whichever region is closest to you. The installer auto-detects your CLI's default and offers it. All Citio resources land in **one** region — remember which, for teardown.
+Use whichever region is closest to you. The installer auto-detects your CLI's default and offers it. All Citio resources land in **one** region; remember which, for teardown.
 
 ### Install and run
 
-**Fastest — one command** (uses the published package, no clone, no build):
+**Fastest**: one command (uses the published package, no clone, no build):
 
 ```bash
 npx @lawrencehui/citio
@@ -230,7 +230,7 @@ Both launch the **same** guided installer, which will:
 
 ## 💰 What it costs
 
-Citio runs on **Fargate Spot by default — roughly 70% cheaper** than on-demand. Fargate bills per second, so cost tracks how long the task actually runs.
+Citio runs on **Fargate Spot by default, roughly 70% cheaper** than on-demand. Fargate bills per second, so cost tracks how long the task actually runs.
 
 | Task size (`citio.yaml` → `deploy.aws`) | Spot (default) | On-demand | Good for |
 |---|---|---|---|
@@ -243,7 +243,7 @@ Plus pennies for ECR storage and EFS (~$0.30/GB-mo). Not free-tier.
 **You rarely pay the monthly figure.** Two ways to keep it near zero:
 
 ```bash
-citio pause      # scale to 0 tasks — compute charges stop, deployment + EFS stay
+citio pause      # scale to 0 tasks, compute charges stop, deployment + EFS stay
 citio resume     # back in ~1–2 min
 
 citio destroy -- --yes --delete-efs    # remove everything
@@ -251,7 +251,7 @@ citio destroy -- --yes --delete-efs    # remove everything
 
 A one-hour demo session costs well under **$1**.
 
-> **Spot note:** AWS can reclaim a Spot task (rare, 2-minute warning). Citio posts a "restarting, please re-send" notice and comes back automatically — fine for a single-instance bot. Want no interruptions? Set `deploy.aws.use_spot: false` in `citio.yaml` for on-demand.
+> **Spot note:** AWS can reclaim a Spot task (rare, 2-minute warning). Citio posts a "restarting, please re-send" notice and comes back automatically, fine for a single-instance bot. Want no interruptions? Set `deploy.aws.use_spot: false` in `citio.yaml` for on-demand.
 
 ### Teardown
 
@@ -309,11 +309,11 @@ deploy:
 | `CITIO_WORKSPACE`    | Workspace path (default `/workspace`)            |
 | `CITIO_MEMORY`       | Memory/audit path (default `/memory`)            |
 
-> 🔐 **Tokens are not stored as plaintext env vars.** Your Slack, GitHub, and provider tokens are written to an **AWS Secrets Manager** secret (`citio/runtime`) and injected into the container by ECS at start — so they are **not** readable via `ecs:DescribeTaskDefinition`. The values above are non-sensitive runtime config only.
+> 🔐 **Tokens are not stored as plaintext env vars.** Your Slack, GitHub, and provider tokens are written to an **AWS Secrets Manager** secret (`citio/runtime`) and injected into the container by ECS at start, so they are **not** readable via `ecs:DescribeTaskDefinition`. The values above are non-sensitive runtime config only.
 
 ## 🎛️ Customizing your instance
 
-Yes — a Citio instance is configured almost entirely through `citio.yaml` (the installer writes it for you, and you can hand-edit then redeploy). The main knobs:
+Yes, a Citio instance is configured almost entirely through `citio.yaml` (the installer writes it for you, and you can hand-edit then redeploy). The main knobs:
 
 | Setting | Where | What it controls |
 | ------- | ----- | ---------------- |
@@ -327,7 +327,7 @@ Yes — a Citio instance is configured almost entirely through `citio.yaml` (the
 | **Bot name** | Slack app manifest (set at install) | The `@name` it answers to |
 | **AWS sizing & names** | `deploy.aws.task_cpu`, `task_memory`, `ephemeral_storage_gb`, `ecr_repo`, `ecs_cluster`, `ecs_service`, `region` | Container resources and the names of the resources Citio provisions |
 
-The fastest way to change behavior is usually `workspace.rules` — those instructions shape how the agent investigates, edits, and reports. After editing `citio.yaml`, re-run `npm run init` (or restart the container) to apply.
+The fastest way to change behavior is usually `workspace.rules`: those instructions shape how the agent investigates, edits, and reports. After editing `citio.yaml`, re-run `npm run init` (or restart the container) to apply.
 
 See [`citio.example.yaml`](citio.example.yaml) for the full annotated shape.
 
@@ -352,15 +352,15 @@ npm run dev         # run locally with tsx
 
 ## 📸 Screenshots
 
-**The PR Citio opened** — real, reviewable work on GitHub:
+**The PR Citio opened** (real, reviewable work on GitHub):
 
 ![A pull request opened by Citio](docs/screenshots/pr.png)
 
-**Working in a channel** — `@mention` it where your team already talks:
+**Working in a channel**: `@mention` it where your team already talks:
 
 ![Citio responding to a channel mention](docs/screenshots/slack-channel.png)
 
-**The installer** — one guided command from zero to deployed:
+**The installer**: one guided command from zero to deployed:
 
 ![The Citio interactive installer](docs/screenshots/installer.png)
 
@@ -374,60 +374,60 @@ Citio is **pre-1.0**. This release deploys natively to **AWS Fargate** (Spot by 
 - ✅ `citio pause` / `citio resume` / `citio destroy` for cost control
 - ⏳ Not yet a hardened sandbox (provider CLIs retain native shell inside the container)
 - ⏳ One active agent task per container
-- ⏳ Native deploy target is **AWS Fargate** today — **on the roadmap:** run on any Docker host (VPS / Fly / Railway / homelab) and a pay-per-use serverless (Slack HTTP → Lambda → on-demand task) mode for ~$1–3/month
+- ⏳ Native deploy target is **AWS Fargate** today, **on the roadmap:** run on any Docker host (VPS / Fly / Railway / homelab) and a pay-per-use serverless (Slack HTTP → Lambda → on-demand task) mode for ~$1–3/month
 
 ### Known limitations
 
 Citio is not a fully hardened multi-cloud platform yet. Treat this release as **AWS-first and pre-1.0**. Read this before deploying anywhere sensitive.
 
 **Security and isolation**
-- Citio is a control plane, but the provider CLIs **still retain native shell capabilities inside the container**. The MCP tool layer is safer than handing an agent raw credentials — but it is **not a policy-grade sandbox**. Run it in an account you're willing to let an agent act in.
+- Citio is a control plane, but the provider CLIs **still retain native shell capabilities inside the container**. The MCP tool layer is safer than handing an agent raw credentials, but it is **not a policy-grade sandbox**. Run it in an account you're willing to let an agent act in.
 - The installer stores secrets in your OS keychain when available, with a file fallback where no keychain backend exists.
 
 **Runtime and sessions**
-- One active agent task runs at a time per container — intentional; the provider session is container-scoped.
+- One active agent task runs at a time per container, intentional; the provider session is container-scoped.
 - Provider sessions don't survive a container restart or redeploy. Citio retries a failed resume as a fresh session, but provider-side conversation state is ephemeral.
 - Workspace state persists across redeploys **only** when EFS persistence is enabled.
 
 **Providers**
 - Claude and Codex are both supported, but not symmetric: Claude uses `CLAUDE_CODE_OAUTH_TOKEN` or an API key; Codex OAuth depends on a persisted `~/.codex/auth.json`.
-- Codex still relies on the CLI's native execution model — its surface isn't as clean as Claude's `--mcp-config`.
+- Codex still relies on the CLI's native execution model, its surface isn't as clean as Claude's `--mcp-config`.
 
 **Installer and deployment**
 - The interactive installer is meant for a **trusted operator machine**, not CI/CD runners.
-- Local `citio.yaml` is local machine state — don't commit it.
+- Local `citio.yaml` is local machine state, don't commit it.
 
 ## 🧯 Troubleshooting
 
 | Symptom | Fix |
 |---|---|
-| `Unable to locate credentials` | Run `aws configure --profile citio` — see [Setting up your AWS profile](#setting-up-your-aws-profile). |
+| `Unable to locate credentials` | Run `aws configure --profile citio`: see [Setting up your AWS profile](#setting-up-your-aws-profile). |
 | `ExpiredToken` / SSO session expired | `aws sso login --profile citio` |
-| `AccessDenied` on **`iam:PassRole`** | Your profile is missing the `IAM` statement. Attach the [least-privilege policy](#permissions) — this is the most common failure. |
+| `AccessDenied` on **`iam:PassRole`** | Your profile is missing the `IAM` statement. Attach the [least-privilege policy](#permissions): this is the most common failure. |
 | `AccessDenied` on **`secretsmanager:*`** | Same cause: add the `Secrets` statement. Citio stores tokens in `citio/runtime`, not in plaintext env vars. |
 | Docker push fails: `no basic auth credentials` | The installer logs into ECR for you. By hand: `aws ecr get-login-password \| docker login --username AWS --password-stdin <account>.dkr.ecr.<region>.amazonaws.com` |
-| Deploy succeeds but Slack is silent | Check the app has `assistant_thread_started` events subscribed — re-paste the manifest from `citio manifest`. |
+| Deploy succeeds but Slack is silent | Check the app has `assistant_thread_started` events subscribed, re-paste the manifest from `citio manifest`. |
 | Costs higher than expected | You may be on on-demand. Confirm `deploy.aws.use_spot` isn't `false` in `citio.yaml`, and use `citio pause` when idle. |
 
 ## 🙌 Contributing
 
-Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Keep diffs small, prefer runtime-safe behavior over clever abstractions, and don't commit local machine state.
+Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Keep diffs small, prefer runtime-safe behavior over clever abstractions, and don't commit local machine state.
 
 ## 🛡️ Security
 
 **How credentials are handled**
 
-- Your Slack, GitHub, and provider tokens live in **AWS Secrets Manager** (`citio/runtime`) — never as plaintext task-definition environment variables, and never baked into the Docker image.
+- Your Slack, GitHub, and provider tokens live in **AWS Secrets Manager** (`citio/runtime`): never as plaintext task-definition environment variables, and never baked into the Docker image.
 - The agent reaches your systems through the **MCP tool layer**, not by holding credentials itself. `run_command` is allowlisted and rejects shell metacharacters.
 - Everything runs in **your** AWS account. No third party sees your code or tokens.
 
 **What Citio is not**
 
-It is **not a hardened sandbox**. The provider CLIs keep native shell access inside the container — see [Known limitations](#known-limitations). Deploy it into an account you're comfortable letting an agent act in.
+It is **not a hardened sandbox**. The provider CLIs keep native shell access inside the container; see [Known limitations](#known-limitations). Deploy it into an account you're comfortable letting an agent act in.
 
 **Reporting**
 
-Found a vulnerability? Report it privately — see [SECURITY.md](SECURITY.md). Please don't open a public issue for credential handling, auth bypass, shell injection, or sandbox escape.
+Found a vulnerability? Report it privately; see [SECURITY.md](SECURITY.md). Please don't open a public issue for credential handling, auth bypass, shell injection, or sandbox escape.
 
 ## 📄 License
 

@@ -35,6 +35,6 @@ Citio is improving, but it is not yet a hardened sandbox:
 - provider CLIs still retain native shell capability inside the container
 - AWS is the only supported deployment target
 - the installer stores secrets in the OS keychain when available, with a file fallback when keychain access is unavailable
-- in the deployed container, tokens are stored in AWS Secrets Manager (`citio/runtime`) and injected by ECS at start — not as plaintext task-definition environment variables
+- in the deployed container, tokens are stored in AWS Secrets Manager (`citio/runtime`) and injected by ECS at start, not as plaintext task-definition environment variables
 
 See [Known limitations](README.md#known-limitations) for the current limitations before deploying Citio in a sensitive environment.
