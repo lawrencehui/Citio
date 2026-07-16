@@ -26,7 +26,7 @@
 
 <br/>
 
-<!-- ![Citio turning a Slack message into a pull request](docs/screenshots/demo.gif) — uncomment when the asset lands -->
+![Citio turning a Slack message into a pull request](docs/screenshots/demo.gif)
 
 *A Slack message becomes an investigated, tested pull request — without leaving the thread.*
 
