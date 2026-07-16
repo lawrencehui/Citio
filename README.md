@@ -373,15 +373,15 @@ npm run dev         # run locally with tsx
 
 **The PR Citio opened** — real, reviewable work on GitHub:
 
-<!-- ![A pull request opened by Citio](docs/screenshots/pr.png) — uncomment when the asset lands -->
+![A pull request opened by Citio](docs/screenshots/pr.png)
 
 **Working in a channel** — `@mention` it where your team already talks:
 
-<!-- ![Citio responding to a channel mention](docs/screenshots/slack-channel.png) — uncomment when the asset lands -->
+![Citio responding to a channel mention](docs/screenshots/slack-channel.png)
 
 **The installer** — one guided command from zero to deployed:
 
-<!-- ![The Citio interactive installer](docs/screenshots/installer.png) — uncomment when the asset lands -->
+![The Citio interactive installer](docs/screenshots/installer.png)
 
 ## 🗺️ Status & roadmap
 
