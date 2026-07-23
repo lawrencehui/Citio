@@ -1,0 +1,19 @@
+# Standalone MCP server image (src/core/mcp-entry.ts) for MCP directory listings
+# (e.g. glama.ai) that build-and-introspect a server with no external
+# credentials available. This is separate from the root Dockerfile, which
+# builds the full Slack agent and requires citio.yaml + Slack/AWS config.
+FROM node:22-slim
+
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+RUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit=dev; fi
+
+COPY dist/ ./dist/
+
+RUN mkdir -p /workspace /memory
+
+ENV CITIO_WORKSPACE=/workspace
+ENV CITIO_MEMORY=/memory
+
+ENTRYPOINT ["node", "dist/core/mcp-entry.js"]
