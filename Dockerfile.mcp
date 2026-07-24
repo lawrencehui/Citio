@@ -1,18 +1,26 @@
 # Standalone MCP server image (src/core/mcp-entry.ts) for MCP directory listings
-# (e.g. glama.ai) that build-and-introspect a server with no external
-# credentials available. This is separate from the root Dockerfile, which
-# builds the full Slack agent and requires citio.yaml + Slack/AWS config.
-FROM node:22-slim
+# such as glama.ai, which build-and-introspect the server with no external
+# credentials available. Separate from the root Dockerfile, which builds the full
+# Slack agent and requires citio.yaml plus Slack/AWS config.
+#
+# Compiles from source: dist/ is a build artifact and is not committed, so this
+# cannot copy a prebuilt dist/ the way the root Dockerfile does.
 
+FROM node:22-slim AS build
 WORKDIR /app
-
 COPY package.json package-lock.json* ./
-RUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit=dev; fi
+RUN npm ci
+COPY tsconfig.json ./
+COPY src/ ./src/
+RUN npm run build
 
-COPY dist/ ./dist/
+FROM node:22-slim
+WORKDIR /app
+COPY package.json package-lock.json* ./
+RUN npm ci --omit=dev && npm cache clean --force
+COPY --from=build /app/dist/ ./dist/
 
 RUN mkdir -p /workspace /memory
-
 ENV CITIO_WORKSPACE=/workspace
 ENV CITIO_MEMORY=/memory
 
